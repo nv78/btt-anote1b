@@ -1,4 +1,4 @@
-# Internship Project – Leaderboard API Development
+# Project – Leaderboard API Development
 
 ## Overview
 This project focuses on developing a **public API** for the Anote Model Leaderboard, enabling:
