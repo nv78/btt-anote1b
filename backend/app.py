@@ -304,6 +304,12 @@ def submit_model():
             "error": "Missing required fields: benchmarkDatasetName, modelName, modelResults (list), sentence_ids (list)",
         }), 400
 
+    try:
+        benchmark_dataset_name = validate_name(benchmark_dataset_name, 'benchmarkDatasetName')
+        model_name = validate_name(model_name, 'modelName')
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
     if len(model_results) != len(sentence_ids):
         return jsonify({
             "success": False,
@@ -585,6 +591,18 @@ def submit_model():
             "metric": metric,
             "created": datetime.utcnow(),
         })
+        logger.info(
+            "Evaluation result persisted to in-memory store",
+            extra={
+                "event": "evaluation_completion",
+                "dataset": benchmark_dataset_name,
+                "model_name": model_name,
+                "submission_id": submission_id,
+                "metric": metric,
+                "score": round(float(score), 6),
+                "storage": "memory",
+            },
+        )
 
     return jsonify({"success": True, "score": float(score)})
 
@@ -666,6 +684,11 @@ def add_dataset_public():
     if not all([name, task_type, evaluation_metric]):
         return jsonify({"success": False, "error": "Missing required fields: name, task_type, evaluation_metric"}), 400
 
+    try:
+        name = validate_name(name, 'name')
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
     if not isinstance(reference_data, (dict, list)):
         return jsonify({"success": False, "error": "reference_data must be JSON object or array"}), 400
 
@@ -680,6 +703,10 @@ def add_dataset_public():
             "url": reference_data.get('url') if isinstance(reference_data, dict) else None,
             "models": [],
         })
+        logger.info(
+            "Dataset created (in-memory)",
+            extra={"event": "dataset_creation", "name": name, "task_type": task_type, "storage": "memory"},
+        )
         return jsonify({"success": True, "message": "Dataset added (in-memory)"})
 
     try:
@@ -688,11 +715,18 @@ def add_dataset_public():
             (name, task_type, evaluation_metric, json.dumps(reference_data))
         )
         conn.commit()
+        logger.info(
+            "Dataset created",
+            extra={"event": "dataset_creation", "name": name, "task_type": task_type, "evaluation_metric": evaluation_metric, "storage": "db"},
+        )
         return jsonify({"success": True, "message": "Dataset added"})
     except Exception as e:
         if 'Duplicate' in str(e) or 'UNIQUE' in str(e):
             return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
-        print(f"add_dataset_public error: {e}")
+        logger.error(
+            "Failed to add dataset to DB",
+            extra={"event": "db_write_failure", "endpoint": "add_dataset_public", "name": name, "error": str(e)},
+        )
         return jsonify({"success": False, "error": "Failed to add dataset"}), 500
     finally:
         try:
@@ -802,10 +836,14 @@ def add_dataset():
     missing = [k for k in required if k not in data]
     if missing:
         return jsonify({"status": "error", "message": f"Missing required fields: {', '.join(missing)}"}), 400
+    try:
+        dataset_name_val = validate_name(data["name"], 'name')
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     dataset_id = str(uuid.uuid4())
     new_ds = {
         "id": dataset_id,
-        "name": data["name"],
+        "name": dataset_name_val,
         "url": data.get("url"),
         "task_type": data["task_type"],
         "description": data.get("description"),
@@ -826,11 +864,16 @@ def add_model():
     missing = [k for k in required if k not in data]
     if missing:
         return jsonify({"status": "error", "message": f"Missing required fields: {', '.join(missing)}"}), 400
+    try:
+        dataset_name_val = validate_name(data["dataset_name"], 'dataset_name')
+        model_name_val = validate_name(data["model"], 'model')
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     for ds in LEADERBOARD_DATA:
-        if ds.get("name") == data["dataset_name"]:
+        if ds.get("name") == dataset_name_val:
             ds.setdefault("models", []).append({
                 "rank": data["rank"],
-                "model": data["model"],
+                "model": model_name_val,
                 "score": data["score"],
                 "ci": data.get("ci"),
                 "updated": data["updated"],
