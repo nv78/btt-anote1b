@@ -501,8 +501,7 @@ def get_leaderboard():
                     except Exception:
                         pass
                 leaderboard.append(entry)
-            return jsonify({
-                "success": True,
+            return success_response({
                 "results": leaderboard,
                 "page": page,
                 "page_size": page_size,
@@ -541,8 +540,7 @@ def get_leaderboard():
         if sub.get("metadata") is not None:
             entry["metadata"] = sub["metadata"]
         leaderboard.append(entry)
-    return jsonify({
-        "success": True,
+    return success_response({
         "results": leaderboard,
         "page": page,
         "page_size": page_size,
