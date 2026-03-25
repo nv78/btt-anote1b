@@ -1450,17 +1450,173 @@ def list_leaderboard_datasets():
     return success_response({"datasets": LEADERBOARD_DATA})
 
 
+
+# ---------------------------
+# Dataset ingestion pipeline
+# ---------------------------
+@app.post('/api/datasets/ingest')
+@require_api_key
+def ingest_dataset():
+    """Ingest a dataset from an external source and store it as a benchmark dataset.
+
+    Accepted JSON body:
+
+      source: "huggingface" or "http_api" (required)
+
+      HuggingFace keys: dataset_id, config_name (opt), split (opt, default "test"),
+        max_samples (opt, default 500), input_field, reference_field, task_type (opt)
+
+      HTTP API keys: url, auth_header (opt), input_field, reference_field,
+        max_samples (opt), data_key (opt), task_type (opt)
+
+      Shared optional keys: name (override dataset name), evaluation_metric (default "bleu")
+
+    Returns the created dataset record on success (HTTP 201).
+    """
+    data = request.get_json(silent=True) or {}
+    source = data.get("source", "").strip().lower()
+
+    if source not in ("huggingface", "http_api"):
+        return jsonify({
+            "success": False,
+            "error": "Field 'source' must be 'huggingface' or 'http_api'",
+        }), 400
+
+    # Lazy import — keeps the ingestion package optional at startup
+    try:
+        if source == "huggingface":
+            from ingestion.huggingface import HuggingFaceIngestor  # type: ignore
+            ingestor = HuggingFaceIngestor()
+        else:
+            from ingestion.http_api import HttpApiIngestor  # type: ignore
+            ingestor = HttpApiIngestor()
+    except ImportError as exc:
+        logger.error(
+            "Ingestion module import failed",
+            extra={"event": "ingest_import_error", "source": source, "error": str(exc)},
+        )
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+    try:
+        record = ingestor.ingest(data)
+    except (KeyError, ValueError) as exc:
+        logger.warning(
+            "Ingestion config error",
+            extra={"event": "ingest_config_error", "source": source, "error": str(exc)},
+        )
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logger.exception(
+            "Ingestion failed",
+            extra={"event": "ingest_error", "source": source, "error": str(exc)},
+        )
+        return jsonify({"success": False, "error": f"Ingestion failed: {exc}"}), 500
+
+    # Build reference_data payload compatible with existing dataset schema
+    source_texts = [s["input"] for s in record.samples]
+    reference_translations = [s["reference"] for s in record.samples]
+    reference_data: Dict[str, Any] = {
+        "source_texts": source_texts,
+        "reference_translations": reference_translations,
+        "url": record.source_url,
+        "description": record.metadata.get("description"),
+        **{k: v for k, v in record.metadata.items() if k != "description"},
+    }
+
+    evaluation_metric = data.get("evaluation_metric", "bleu")
+
+    # Persist to DB if available; otherwise fall back to in-memory store
+    conn, cursor = get_db_connection()
+    dataset_id_val: Optional[str] = None
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "INSERT INTO benchmark_datasets "
+                "(name, task_type, evaluation_metric, reference_data, active) "
+                "VALUES (%s, %s, %s, %s, TRUE)",
+                (record.name, record.task_type, evaluation_metric, json.dumps(reference_data)),
+            )
+            conn.commit()
+            dataset_id_val = str(cursor.lastrowid)
+            logger.info(
+                "Ingested dataset persisted to database",
+                extra={
+                    "event": "ingest_complete",
+                    "name": record.name,
+                    "task_type": record.task_type,
+                    "sample_count": len(record.samples),
+                    "storage": "db",
+                },
+            )
+        except Exception as exc:
+            if "Duplicate" in str(exc) or "UNIQUE" in str(exc):
+                return jsonify({
+                    "success": False,
+                    "error": f"Dataset '{record.name}' already exists",
+                }), 400
+            logger.error(
+                "DB write failed during ingestion; falling back to in-memory",
+                extra={
+                    "event": "db_write_failure",
+                    "endpoint": "ingest_dataset",
+                    "error": str(exc),
+                },
+            )
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    if dataset_id_val is None:
+        # In-memory fallback
+        dataset_id_val = str(uuid.uuid4())
+        LEADERBOARD_DATA.append({
+            "id": dataset_id_val,
+            "name": record.name,
+            "task_type": record.task_type,
+            "evaluation_metric": evaluation_metric,
+            "description": record.metadata.get("description"),
+            "url": record.source_url,
+            "models": [],
+        })
+        logger.info(
+            "Ingested dataset persisted to in-memory store",
+            extra={
+                "event": "ingest_complete",
+                "name": record.name,
+                "task_type": record.task_type,
+                "sample_count": len(record.samples),
+                "storage": "memory",
+            },
+        )
+
+    return jsonify({
+        "success": True,
+        "dataset": {
+            "id": dataset_id_val,
+            "name": record.name,
+            "task_type": record.task_type,
+            "split": record.split,
+            "evaluation_metric": evaluation_metric,
+            "sample_count": len(record.samples),
+            "source_url": record.source_url,
+            "metadata": record.metadata,
+        },
+    }), 201
+
+
 # ---------------------------
 # CSV Benchmarks (benchmark_csvs folder)
 # ---------------------------
 @app.get('/public/benchmark_csvs')
 def list_benchmark_csvs():
     if not csv_bench:
-        return jsonify({"success": False, "error": "CSV benchmark module unavailable"}), 500
+        return error_response("CSV benchmark module unavailable", code="MODULE_UNAVAILABLE", status=500)
     items = csv_bench.list_csv_datasets()
     # Only return filename and inferred task for brevity
-    return jsonify({
-        "success": True,
+    return success_response({
         "datasets": [
             {"filename": it["filename"], "task_type": it["task_type"], "columns": it.get("columns")}
             for it in items
