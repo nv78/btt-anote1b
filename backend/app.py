@@ -850,6 +850,10 @@ def add_dataset():
         "models": data.get("models", []),
     }
     LEADERBOARD_DATA.append(new_ds)
+    logger.info(
+        "Dataset added to leaderboard (in-memory)",
+        extra={"event": "dataset_creation", "name": dataset_name_val, "task_type": data["task_type"], "dataset_id": dataset_id, "storage": "memory"},
+    )
     return jsonify({
         "status": "success",
         "message": "Dataset added to leaderboard.",
