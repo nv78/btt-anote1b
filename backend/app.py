@@ -1232,15 +1232,15 @@ def add_dataset_public():
     reference_data = data.get('reference_data') or {}
 
     if not all([name, task_type, evaluation_metric]):
-        return jsonify({"success": False, "error": "Missing required fields: name, task_type, evaluation_metric"}), 400
+        return error_response("Missing required fields: name, task_type, evaluation_metric", code="MISSING_FIELDS")
 
     try:
         name = validate_name(name, 'name')
     except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return error_response(str(exc), code="INVALID_PARAM")
 
     if not isinstance(reference_data, (dict, list)):
-        return jsonify({"success": False, "error": "reference_data must be JSON object or array"}), 400
+        return error_response("reference_data must be JSON object or array", code="INVALID_PARAM")
 
     conn, cursor = get_db_connection()
     if not (conn and cursor):
@@ -1257,7 +1257,7 @@ def add_dataset_public():
             "Dataset created (in-memory)",
             extra={"event": "dataset_creation", "name": name, "task_type": task_type, "storage": "memory"},
         )
-        return jsonify({"success": True, "message": "Dataset added (in-memory)"})
+        return success_response({"message": "Dataset added (in-memory)"})
 
     try:
         cursor.execute(
@@ -1269,15 +1269,15 @@ def add_dataset_public():
             "Dataset created",
             extra={"event": "dataset_creation", "name": name, "task_type": task_type, "evaluation_metric": evaluation_metric, "storage": "db"},
         )
-        return jsonify({"success": True, "message": "Dataset added"})
+        return success_response({"message": "Dataset added"})
     except Exception as e:
         if 'Duplicate' in str(e) or 'UNIQUE' in str(e):
-            return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+            return error_response("Dataset with this name already exists", code="DUPLICATE")
         logger.error(
             "Failed to add dataset to DB",
             extra={"event": "db_write_failure", "endpoint": "add_dataset_public", "name": name, "error": str(e)},
         )
-        return jsonify({"success": False, "error": "Failed to add dataset"}), 500
+        return error_response("Failed to add dataset", code="DB_ERROR", status=500)
     finally:
         try:
             cursor.close(); conn.close()
