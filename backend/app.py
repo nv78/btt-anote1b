@@ -5,6 +5,7 @@ import json
 import logging
 import functools
 from datetime import datetime
+from typing import Any, Dict, Optional
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import uuid
@@ -108,6 +109,39 @@ try:
     import csv_bench  # type: ignore
 except Exception:
     csv_bench = None
+
+
+# ---------------------------
+# API key authentication
+# ---------------------------
+_API_KEYS_RAW = os.getenv('API_KEYS', '')
+if _API_KEYS_RAW.strip():
+    _VALID_API_KEYS = {k.strip() for k in _API_KEYS_RAW.split(',') if k.strip()}
+    logger.info("API key authentication enabled (%d key(s) loaded)", len(_VALID_API_KEYS))
+else:
+    _VALID_API_KEYS = set()
+    logger.warning(
+        "API_KEYS env var not set; write endpoint authentication is DISABLED. "
+        "Set API_KEYS=<comma-separated keys> to enable."
+    )
+
+
+def require_api_key(f):
+    """Decorator that enforces X-API-Key header authentication on write endpoints.
+
+    If API_KEYS env var is not configured, authentication is skipped (open dev mode).
+    Returns 401 JSON when a key is missing or invalid.
+    """
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        if not _VALID_API_KEYS:
+            # Auth disabled — pass through
+            return f(*args, **kwargs)
+        provided_key = request.headers.get('X-API-Key', '')
+        if provided_key not in _VALID_API_KEYS:
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 # ---------------------------
