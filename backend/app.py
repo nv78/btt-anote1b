@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import logging
+import functools
 from datetime import datetime
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
@@ -338,7 +339,7 @@ def get_leaderboard():
         sub = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
         if not sub:
             continue
-        leaderboard.append({
+        entry: Dict[str, Any] = {
             "rank": offset + i + 1,
             "model_name": sub["model_name"],
             "dataset_name": sub["benchmark_dataset_name"],
@@ -346,7 +347,10 @@ def get_leaderboard():
             "evaluation_metric": ev["metric"],
             "score": ev["score"],
             "submitted_at": sub["created"].isoformat(),
-        })
+        }
+        if sub.get("metadata") is not None:
+            entry["metadata"] = sub["metadata"]
+        leaderboard.append(entry)
     return jsonify({
         "success": True,
         "results": leaderboard,

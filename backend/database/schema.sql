@@ -197,6 +197,15 @@ CREATE TABLE user_company_chatbots (
 
 
 
+-- API keys table for leaderboard write endpoint authentication
+CREATE TABLE IF NOT EXISTS api_keys (
+  id VARCHAR(36) PRIMARY KEY,
+  key_hash VARCHAR(64) NOT NULL UNIQUE,
+  owner VARCHAR(200) NOT NULL,
+  active BOOLEAN DEFAULT TRUE,
+  created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Leaderboard tables
 CREATE TABLE benchmark_datasets (
     id INTEGER PRIMARY KEY AUTO_INCREMENT,
