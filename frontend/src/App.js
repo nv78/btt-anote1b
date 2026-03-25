@@ -2,6 +2,7 @@ import LandingPage from "./landing_page/LandingPage";
 import ReactGA4 from "react-ga4";
 import { BrowserRouter as Router, useLocation } from "react-router-dom";
 import { useEffect } from "react";
+import ErrorBoundary from "./ErrorBoundary";
 ReactGA4.initialize("G-CMN1GX5JE1");
 
 function PageTracker({subdomain}) {
@@ -19,10 +20,12 @@ function PageTracker({subdomain}) {
 
 function App() {
   return (
-    <Router>
-      <PageTracker subdomain="landingpage" />
-      <LandingPage />
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <PageTracker subdomain="landingpage" />
+        <LandingPage />
+      </Router>
+    </ErrorBoundary>
   );
 }
 
