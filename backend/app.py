@@ -1,8 +1,10 @@
 import os
+import csv
+import io
 import json
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import uuid
 
@@ -21,6 +23,18 @@ try:
     from nltk.translate.bleu_score import sentence_bleu
 except Exception:
     sentence_bleu = None
+
+# Optional Flask-Limiter
+try:
+    from flask_limiter import Limiter  # type: ignore
+    from flask_limiter.util import get_remote_address  # type: ignore
+    FLASK_LIMITER_AVAILABLE = True
+except ImportError:
+    FLASK_LIMITER_AVAILABLE = False
+    logger.warning(
+        "flask-limiter not installed; rate limiting will be disabled. "
+        "Install with: pip install Flask-Limiter>=3.5.0"
+    )
 
 # Optional BERTScore
 def _optional_bertscore(predictions, references):
@@ -64,6 +78,29 @@ if _origins:
 else:
     _origins_list = ['*']
 CORS(app, resources={r"/*": {"origins": _origins_list}})
+
+# ---------------------------
+# Rate limiting (optional)
+# ---------------------------
+_RATE_LIMIT_DEFAULT = os.getenv('RATE_LIMIT_DEFAULT', '200 per day, 50 per hour')
+_RATE_LIMIT_SUBMIT = os.getenv('RATE_LIMIT_SUBMIT', '10 per minute')
+_RATE_LIMIT_CSV_BENCH = os.getenv('RATE_LIMIT_CSV_BENCH', '5 per minute')
+
+if FLASK_LIMITER_AVAILABLE:
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=[_RATE_LIMIT_DEFAULT],
+        storage_uri='memory://',
+    )
+else:
+    # Stub limiter with a no-op limit decorator so endpoint code is identical
+    class _NoOpLimiter:
+        def limit(self, *args, **kwargs):
+            def decorator(f):
+                return f
+            return decorator
+    limiter = _NoOpLimiter()
 
 # Lazy import to avoid import-time failures if files not present
 try:
@@ -256,6 +293,131 @@ def get_leaderboard():
             )
         finally:
             try:
+
+@app.get('/public/export/leaderboard')
+def export_leaderboard():
+    """Export leaderboard data as CSV or JSON.
+
+    Query params:
+      - dataset (optional): filter by dataset name
+      - format (optional): 'csv' or 'json' (default 'json')
+    """
+    dataset_filter = request.args.get('dataset', '').strip()
+    fmt = request.args.get('format', 'json').strip().lower()
+    if fmt not in ('csv', 'json'):
+        return jsonify({"success": False, "error": "format must be 'csv' or 'json'"}), 400
+
+    limit = 10000  # generous cap for export
+    conn, cursor = get_db_connection()
+    leaderboard = []
+
+    if conn and cursor:
+        try:
+            if dataset_filter:
+                query = (
+                    "SELECT ms.model_name, ms.submitted_by, bd.name AS dataset_name, "
+                    "er.score, ms.created AS submitted_at "
+                    "FROM model_submissions ms "
+                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                    "WHERE bd.active = TRUE AND bd.name = %s "
+                    "ORDER BY er.score DESC "
+                    "LIMIT %s"
+                )
+                cursor.execute(query, (dataset_filter, limit))
+            else:
+                query = (
+                    "SELECT ms.model_name, ms.submitted_by, bd.name AS dataset_name, "
+                    "er.score, ms.created AS submitted_at "
+                    "FROM model_submissions ms "
+                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                    "WHERE bd.active = TRUE "
+                    "ORDER BY bd.name, er.score DESC "
+                    "LIMIT %s"
+                )
+                cursor.execute(query, (limit,))
+            rows = cursor.fetchall()
+            rank = 1
+            current_dataset = None
+            for row in rows:
+                ds = row['dataset_name']
+                if ds != current_dataset:
+                    rank = 1
+                    current_dataset = ds
+                leaderboard.append({
+                    "rank": rank,
+                    "model_name": row['model_name'],
+                    "submitted_by": row.get('submitted_by') or "",
+                    "score": float(row['score']),
+                    "dataset_name": ds,
+                    "submitted_at": row['submitted_at'].isoformat() if row.get('submitted_at') else "",
+                })
+                rank += 1
+        except Exception as e:
+            logger.error(
+                "Error reading leaderboard for export",
+                extra={"event": "db_read_failure", "endpoint": "export_leaderboard", "error": str(e)},
+            )
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    if not leaderboard:
+        # In-memory fallback
+        mem = sorted(_STORE["evaluations"], key=lambda x: x["score"], reverse=True)[:limit]
+        for i, ev in enumerate(mem):
+            sub = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
+            if not sub:
+                continue
+            ds = sub["benchmark_dataset_name"]
+            if dataset_filter and ds != dataset_filter:
+                continue
+            leaderboard.append({
+                "rank": i + 1,
+                "model_name": sub["model_name"],
+                "submitted_by": sub.get("submitted_by") or "",
+                "score": ev["score"],
+                "dataset_name": ds,
+                "submitted_at": sub["created"].isoformat(),
+            })
+
+    safe_dataset = dataset_filter.replace('/', '_').replace('\\', '_') if dataset_filter else "all"
+
+    if fmt == 'csv':
+        output = io.StringIO()
+        writer = csv.DictWriter(
+            output,
+            fieldnames=["rank", "model_name", "submitted_by", "score", "submitted_at"],
+            extrasaction='ignore',
+        )
+        writer.writeheader()
+        writer.writerows(leaderboard)
+        csv_bytes = output.getvalue().encode('utf-8')
+        return Response(
+            csv_bytes,
+            mimetype='text/csv',
+            headers={
+                'Content-Disposition': f'attachment; filename=leaderboard-{safe_dataset}.csv',
+                'Content-Length': str(len(csv_bytes)),
+            },
+        )
+
+    # JSON format
+    json_bytes = json.dumps(leaderboard, indent=2, default=str).encode('utf-8')
+    return Response(
+        json_bytes,
+        mimetype='application/json',
+        headers={
+            'Content-Disposition': f'attachment; filename=leaderboard-{safe_dataset}.json',
+            'Content-Length': str(len(json_bytes)),
+        },
+    )
+
+
                 cursor.close()
                 conn.close()
             except Exception:
@@ -281,6 +443,7 @@ def get_leaderboard():
 
 
 @app.post('/public/submit_model')
+@limiter.limit(_RATE_LIMIT_SUBMIT)
 def submit_model():
     """Submit model results to a benchmark dataset and compute evaluation.
 
@@ -929,11 +1092,15 @@ def list_benchmark_models():
         models = _mdl.list_models()
         return jsonify({"success": True, "models": models})
     except Exception as e:
-        print(f"list_benchmark_models error: {e}")
+        logger.error(
+            "Failed to retrieve model list",
+            extra={"event": "unhandled_exception", "endpoint": "list_benchmark_models", "error": str(e)},
+        )
         return jsonify({"success": False, "error": "Model list unavailable"}), 500
 
 
 @app.post('/public/run_csv_benchmarks')
+@limiter.limit(_RATE_LIMIT_CSV_BENCH)
 def run_csv_benchmarks():
     """Run evaluations over CSV datasets using provided model configs.
 
@@ -965,7 +1132,10 @@ def run_csv_benchmarks():
         summary = csv_bench.run_benchmarks(models=models, datasets=datasets, sample_size=sample_size)
         return jsonify({"success": True, **summary})
     except Exception as e:
-        print(f"CSV benchmarks error: {e}")
+        logger.exception(
+            "CSV benchmarks run failed",
+            extra={"event": "unhandled_exception", "endpoint": "run_csv_benchmarks", "error": str(e)},
+        )
         return jsonify({"success": False, "error": "Failed to run benchmarks"}), 500
 
 
