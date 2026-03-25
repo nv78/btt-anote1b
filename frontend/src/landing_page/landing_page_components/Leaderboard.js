@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { submittoleaderboardPath, csvBenchmarksPath } from "../../constants/RouteConstants";
+import { submittoleaderboardPath, csvBenchmarksPath, addDatasetPath } from "../../constants/RouteConstants";
 import { useNavigate } from "react-router-dom";
 
 const Leaderboard = () => {
@@ -1042,6 +1042,12 @@ const Leaderboard = () => {
           onClick={() => navigate(csvBenchmarksPath)}
         >
           Run Benchmarks
+        </button>
+        <button
+          className="px-6 py-2 rounded-md text-lg font-semibold transition-colors border border-green-500/60 text-green-300 hover:bg-green-500/10"
+          onClick={() => navigate(addDatasetPath)}
+        >
+          Add Dataset
         </button>
         <button
           className="px-6 py-2 rounded-md text-lg font-semibold transition-colors border border-gray-600 text-gray-300 hover:bg-gray-700/40"

@@ -798,21 +798,21 @@ def submit_model():
     metadata = data.get('metadata')
 
     if not all([benchmark_dataset_name, model_name, isinstance(model_results, list), isinstance(sentence_ids, list)]):
-        return jsonify({
-            "success": False,
-            "error": "Missing required fields: benchmarkDatasetName, modelName, modelResults (list), sentence_ids (list)",
-        }), 400
+        return error_response(
+            "Missing required fields: benchmarkDatasetName, modelName, modelResults (list), sentence_ids (list)",
+            code="MISSING_FIELDS",
+        )
 
     # Validate optional metadata field
     if metadata is not None:
         if not isinstance(metadata, dict):
-            return jsonify({"success": False, "error": "metadata must be a JSON object (dict)"}), 400
+            return error_response("metadata must be a JSON object (dict)", code="INVALID_METADATA")
         try:
             metadata_json = json.dumps(metadata)
         except (TypeError, ValueError) as exc:
-            return jsonify({"success": False, "error": f"metadata is not JSON-serializable: {exc}"}), 400
+            return error_response(f"metadata is not JSON-serializable: {exc}", code="INVALID_METADATA")
         if len(metadata_json.encode('utf-8')) > 4096:
-            return jsonify({"success": False, "error": "metadata exceeds maximum size of 4096 bytes"}), 400
+            return error_response("metadata exceeds maximum size of 4096 bytes", code="INVALID_METADATA")
     else:
         metadata_json = None
 
@@ -820,13 +820,13 @@ def submit_model():
         benchmark_dataset_name = validate_name(benchmark_dataset_name, 'benchmarkDatasetName')
         model_name = validate_name(model_name, 'modelName')
     except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return error_response(str(exc), code="INVALID_PARAM")
 
     if len(model_results) != len(sentence_ids):
-        return jsonify({
-            "success": False,
-            "error": "Length of sentence_ids must match length of modelResults",
-        }), 400
+        return error_response(
+            "Length of sentence_ids must match length of modelResults",
+            code="INVALID_PARAM",
+        )
 
     # Pull dataset metadata if available
     dataset = None
