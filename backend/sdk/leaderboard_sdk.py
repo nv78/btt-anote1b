@@ -28,7 +28,22 @@ class LeaderboardClient:
             headers["X-API-Key"] = self.api_key
         r = requests.request(method, url, json=json, headers=headers, timeout=self.timeout)
         r.raise_for_status()
-        return r.json()
+        body = r.json()
+        # Handle the standard response envelope {"ok": True/False, "data": ...}.
+        # Falls back to returning the raw body for older server versions that lack the envelope.
+        if isinstance(body, dict) and "ok" in body:
+            if body["ok"]:
+                return body.get("data", body)
+            else:
+                err = body.get("error", {})
+                if isinstance(err, dict):
+                    msg = err.get("message", "Unknown error")
+                    code = err.get("code", "ERROR")
+                else:
+                    msg = str(err)
+                    code = "ERROR"
+                raise ValueError(f"[{code}] {msg}")
+        return body
 
     # Curated leaderboard
     def add_dataset(self, name: str, task_type: str, url: Optional[str] = None, description: Optional[str] = None, models: Optional[list] = None) -> Dict[str, Any]:

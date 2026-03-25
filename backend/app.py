@@ -945,7 +945,7 @@ def submit_model():
         tt = (task_type or '').lower()
         if tt == 'text_classification':
             if not reference_labels:
-                return jsonify({"success": False, "error": "Dataset does not have reference labels"}), 400
+                return error_response("Dataset does not have reference labels", code="MISSING_REFERENCE_DATA")
             metric = (metric or 'accuracy').lower()
             if metric == 'f1':
                 score = _f1_macro(reference_labels, model_results)
@@ -953,7 +953,7 @@ def submit_model():
                 score = _accuracy(reference_labels, model_results)
         elif tt == 'ner':
             if not reference_entities:
-                return jsonify({"success": False, "error": "Dataset does not have reference entities"}), 400
+                return error_response("Dataset does not have reference entities", code="MISSING_REFERENCE_DATA")
             # Parse predicted entities by splitting on ';'
             pred_lists = []
             for out in model_results:
@@ -962,7 +962,7 @@ def submit_model():
             score = _f1_entities(reference_entities, pred_lists)
         elif tt in ('chatbot', 'prompting', 'qa'):
             if not reference_answers:
-                return jsonify({"success": False, "error": "Dataset does not have reference answers"}), 400
+                return error_response("Dataset does not have reference answers", code="MISSING_REFERENCE_DATA")
             metric = (metric or 'exact').lower()
             vals = []
             for ref, pred in zip(reference_answers, model_results):
@@ -1004,7 +1004,7 @@ def submit_model():
                 "error": str(e),
             },
         )
-        return jsonify({"success": False, "error": "Evaluation failed"}), 500
+        return error_response("Evaluation failed", code="EVALUATION_ERROR", status=500)
 
     # Audit log: model submission received and evaluated
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
