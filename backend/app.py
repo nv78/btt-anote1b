@@ -591,7 +591,7 @@ def export_leaderboard():
     dataset_filter = request.args.get('dataset', '').strip()
     fmt = request.args.get('format', 'json').strip().lower()
     if fmt not in ('csv', 'json'):
-        return jsonify({"success": False, "error": "format must be 'csv' or 'json'"}), 400
+        return error_response("format must be 'csv' or 'json'", code="INVALID_PARAM")
 
     limit = 10000  # generous cap for export
     conn, cursor = get_db_connection()
