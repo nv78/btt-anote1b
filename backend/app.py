@@ -1,9 +1,20 @@
 import os
 import json
+import logging
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid
+
+# ---------------------------
+# Logging configuration
+# ---------------------------
+_LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+logging.basicConfig(
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
+)
+logger = logging.getLogger('leaderboard')
 
 # Optional imports for evaluation
 try:
@@ -37,7 +48,10 @@ def get_db_connection():
         return conn, cursor
     except Exception as e:
         # Database might not be configured in local dev. Return None to use in-memory fallback.
-        print(f"Warning: DB connection not available: {e}")
+        logger.warning(
+            "Database connection unavailable; using in-memory fallback",
+            extra={"event": "db_connection_failure", "error": str(e)},
+        )
         return None, None
 
 
@@ -56,6 +70,24 @@ try:
     import csv_bench  # type: ignore
 except Exception:
     csv_bench = None
+
+
+# ---------------------------
+# Input validation helpers
+# ---------------------------
+def validate_name(value: str, field: str, max_len: int = 200) -> str:
+    """Validate a name/string field.
+
+    Raises ValueError with a descriptive message if the value is empty,
+    whitespace-only, or exceeds max_len characters.
+    Returns the stripped value on success.
+    """
+    if not value or not str(value).strip():
+        raise ValueError(f"'{field}' must not be empty or whitespace-only")
+    stripped = str(value).strip()
+    if len(stripped) > max_len:
+        raise ValueError(f"'{field}' must not exceed {max_len} characters (got {len(stripped)})")
+    return stripped
 
 
 # Root welcome endpoint for quick sanity check
@@ -218,7 +250,10 @@ def get_leaderboard():
                 })
             return jsonify({"success": True, "leaderboard": leaderboard})
         except Exception as e:
-            print(f"Error reading leaderboard from DB: {e}")
+            logger.error(
+                "Error reading leaderboard from DB",
+                extra={"event": "db_read_failure", "endpoint": "get_leaderboard", "error": str(e)},
+            )
         finally:
             try:
                 cursor.close()
@@ -442,8 +477,32 @@ def submit_model():
             else:
                 score = _optional_bertscore(model_results, reference_sentences)
     except Exception as e:
-        print(f"Evaluation failed: {e}")
+        logger.exception(
+            "Unhandled exception during evaluation",
+            extra={
+                "event": "evaluation_error",
+                "dataset": benchmark_dataset_name,
+                "model_name": model_name,
+                "error": str(e),
+            },
+        )
         return jsonify({"success": False, "error": "Evaluation failed"}), 500
+
+    # Audit log: model submission received and evaluated
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    submitted_by = data.get('submittedBy') or 'public@anote.ai'
+    logger.info(
+        "Model submission evaluated",
+        extra={
+            "event": "model_submission",
+            "dataset": benchmark_dataset_name,
+            "model_name": model_name,
+            "submitted_by": submitted_by,
+            "ip": client_ip,
+            "metric": metric,
+            "score": round(float(score), 6),
+        },
+    )
 
     # Try to persist in DB; otherwise store in memory
     conn, cursor = get_db_connection()
@@ -478,8 +537,28 @@ def submit_model():
                 (submission_id, float(score), json.dumps({"metric": metric}))
             )
             conn.commit()
+            logger.info(
+                "Evaluation result persisted to database",
+                extra={
+                    "event": "evaluation_completion",
+                    "dataset": benchmark_dataset_name,
+                    "model_name": model_name,
+                    "submission_id": submission_id,
+                    "metric": metric,
+                    "score": round(float(score), 6),
+                    "storage": "db",
+                },
+            )
         except Exception as e:
-            print(f"DB write failed, storing in memory instead: {e}")
+            logger.error(
+                "DB write failed; falling back to in-memory store",
+                extra={
+                    "event": "db_write_failure",
+                    "dataset": benchmark_dataset_name,
+                    "model_name": model_name,
+                    "error": str(e),
+                },
+            )
             submission_id = None
         finally:
             try:
