@@ -210,9 +210,46 @@ def validate_name(value: str, field: str, max_len: int = 200) -> str:
     return stripped
 
 
+# ---------------------------
+# Standard response helpers
+# ---------------------------
+def success_response(data):
+    """Wrap data in a standard success envelope: {"ok": True, "data": ...}."""
+    return jsonify({"ok": True, "data": data})
+
+
+def error_response(message, code="ERROR", status=400):
+    """Wrap an error in a standard envelope: {"ok": False, "error": {"code": ..., "message": ...}}."""
+    return jsonify({"ok": False, "error": {"code": code, "message": message}}), status
+
+
 # Root welcome endpoint for quick sanity check
 @app.get('/')
 def index():
+    """Welcome endpoint — returns API name, version, and available routes.
+    ---
+    tags:
+      - general
+    summary: API info
+    responses:
+      200:
+        description: API information
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+              example: Anote Leaderboard API
+            version:
+              type: string
+              example: "0.1"
+            endpoints:
+              type: array
+              items:
+                type: string
+            note:
+              type: string
+    """
     return jsonify({
         "name": "Anote Leaderboard API",
         "version": "0.1",
@@ -231,6 +268,25 @@ def index():
 # Simple health endpoint
 @app.get('/health')
 def health():
+    """Health check endpoint.
+    ---
+    tags:
+      - general
+    summary: Health check
+    responses:
+      200:
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            ok:
+              type: boolean
+              example: true
+            time:
+              type: string
+              format: date-time
+              example: "2024-01-01T00:00:00"
+    """
     return jsonify({"ok": True, "time": datetime.utcnow().isoformat()})
 
 
@@ -258,7 +314,11 @@ def _get_bleu(translations, references, weights=(0.5, 0.5, 0, 0)):
 _STORE = {
     "submissions": [],  # {id, benchmark_dataset_name, model_name, results, created}
     "evaluations": [],  # {submission_id, score, metric, created}
+    "csv_benchmark_cache": {},  # {cache_key: {result, cached_at}}
 }
+
+# CSV benchmark cache TTL in seconds (default 1 hour)
+BENCHMARK_CACHE_TTL = int(os.getenv('BENCHMARK_CACHE_TTL', '3600'))
 
 # UI-oriented datasets store (for add_dataset/add_model endpoints)
 LEADERBOARD_DATA = []  # list of dicts with fields per README
@@ -338,11 +398,60 @@ def get_source_sentences():
 @app.get('/public/get_leaderboard')
 def get_leaderboard():
     """Get leaderboard showing model submissions and scores.
-    Supports DB if configured, otherwise returns in-memory results.
-
-    Query params:
-        page      (int, default 1)             — 1-based page number
-        page_size (int, default 25, max 100)   — results per page
+    ---
+    tags:
+      - leaderboard
+    summary: Get ranked leaderboard results
+    description: >
+      Returns paginated model evaluation results ordered by dataset and score.
+      Uses MySQL if configured, otherwise falls back to in-memory store.
+    parameters:
+      - name: page
+        in: query
+        type: integer
+        default: 1
+        description: 1-based page number
+      - name: page_size
+        in: query
+        type: integer
+        default: 25
+        description: Number of results per page (max 100)
+    responses:
+      200:
+        description: Paginated leaderboard entries
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            results:
+              type: array
+              items:
+                type: object
+                properties:
+                  rank:
+                    type: integer
+                  model_name:
+                    type: string
+                  dataset_name:
+                    type: string
+                  task_type:
+                    type: string
+                  evaluation_metric:
+                    type: string
+                  score:
+                    type: number
+                    format: float
+                  submitted_at:
+                    type: string
+                    format: date-time
+            page:
+              type: integer
+            page_size:
+              type: integer
+            total:
+              type: integer
     """
     page = max(1, int(request.args.get('page', 1)))
     page_size = min(100, max(1, int(request.args.get('page_size', 25))))
@@ -919,7 +1028,41 @@ def submit_model():
 # ---------------------------
 @app.get('/public/datasets')
 def list_public_datasets():
-    """List active benchmark datasets with basic metadata."""
+    """List active benchmark datasets with basic metadata.
+    ---
+    tags:
+      - datasets
+    summary: List benchmark datasets
+    responses:
+      200:
+        description: List of active benchmark datasets
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            datasets:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: flores_spanish_translation
+                  task_type:
+                    type: string
+                    example: translation
+                  evaluation_metric:
+                    type: string
+                    example: bleu
+                  description:
+                    type: string
+                  url:
+                    type: string
+                  size:
+                    type: integer
+    """
     conn, cursor = get_db_connection()
     if conn and cursor:
         try:
@@ -1170,6 +1313,7 @@ def add_dataset():
 
 
 @app.post('/api/leaderboard/add_model')
+@require_api_key
 def add_model():
     data = request.get_json(silent=True) or {}
     required = ["dataset_name", "model", "rank", "score", "updated"]
@@ -1246,6 +1390,7 @@ def list_benchmark_models():
 
 @app.post('/public/run_csv_benchmarks')
 @limiter.limit(_RATE_LIMIT_CSV_BENCH)
+@require_api_key
 def run_csv_benchmarks():
     """Run evaluations over CSV datasets using provided model configs.
 

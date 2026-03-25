@@ -16,13 +16,17 @@ from typing import Any, Dict, Optional
 
 
 class LeaderboardClient:
-    def __init__(self, base_url: Optional[str] = None, timeout: int = 20):
+    def __init__(self, base_url: Optional[str] = None, timeout: int = 20, api_key: Optional[str] = None):
         self.base_url = base_url or os.getenv("LEADERBOARD_API_BASE", "http://localhost:5001")
         self.timeout = timeout
+        self.api_key = api_key or os.getenv("LEADERBOARD_API_KEY")
 
     def _request(self, method: str, path: str, json: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
-        r = requests.request(method, url, json=json, timeout=self.timeout)
+        headers: Dict[str, str] = {}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        r = requests.request(method, url, json=json, headers=headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
 
