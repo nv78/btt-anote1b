@@ -1477,10 +1477,7 @@ def ingest_dataset():
     source = data.get("source", "").strip().lower()
 
     if source not in ("huggingface", "http_api"):
-        return jsonify({
-            "success": False,
-            "error": "Field 'source' must be 'huggingface' or 'http_api'",
-        }), 400
+        return error_response("Field 'source' must be 'huggingface' or 'http_api'", code="INVALID_PARAM")
 
     # Lazy import — keeps the ingestion package optional at startup
     try:
@@ -1495,7 +1492,7 @@ def ingest_dataset():
             "Ingestion module import failed",
             extra={"event": "ingest_import_error", "source": source, "error": str(exc)},
         )
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return error_response(str(exc), code="MODULE_UNAVAILABLE", status=500)
 
     try:
         record = ingestor.ingest(data)
@@ -1504,13 +1501,13 @@ def ingest_dataset():
             "Ingestion config error",
             extra={"event": "ingest_config_error", "source": source, "error": str(exc)},
         )
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return error_response(str(exc), code="INVALID_PARAM")
     except Exception as exc:
         logger.exception(
             "Ingestion failed",
             extra={"event": "ingest_error", "source": source, "error": str(exc)},
         )
-        return jsonify({"success": False, "error": f"Ingestion failed: {exc}"}), 500
+        return error_response(f"Ingestion failed: {exc}", code="INGEST_ERROR", status=500)
 
     # Build reference_data payload compatible with existing dataset schema
     source_texts = [s["input"] for s in record.samples]
@@ -1550,10 +1547,7 @@ def ingest_dataset():
             )
         except Exception as exc:
             if "Duplicate" in str(exc) or "UNIQUE" in str(exc):
-                return jsonify({
-                    "success": False,
-                    "error": f"Dataset '{record.name}' already exists",
-                }), 400
+                return error_response(f"Dataset '{record.name}' already exists", code="DUPLICATE")
             logger.error(
                 "DB write failed during ingestion; falling back to in-memory",
                 extra={
@@ -1592,8 +1586,7 @@ def ingest_dataset():
             },
         )
 
-    return jsonify({
-        "success": True,
+    return success_response({
         "dataset": {
             "id": dataset_id_val,
             "name": record.name,
