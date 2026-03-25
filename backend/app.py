@@ -1117,10 +1117,10 @@ def submit_model():
             },
         )
 
-    response: Dict[str, Any] = {"success": True, "score": float(score)}
+    response_data: Dict[str, Any] = {"score": float(score)}
     if metadata is not None:
-        response["metadata"] = metadata
-    return jsonify(response)
+        response_data["metadata"] = metadata
+    return success_response(response_data)
 
 
 # ---------------------------
@@ -1191,7 +1191,7 @@ def list_public_datasets():
                     "evaluation_metric": r['evaluation_metric'],
                     **extra,
                 })
-            return jsonify({"success": True, "datasets": items})
+            return success_response({"datasets": items})
         finally:
             try:
                 cursor.close(); conn.close()
@@ -1210,7 +1210,7 @@ def list_public_datasets():
             "url": ds.get("url"),
             "description": ds.get("description"),
         })
-    return jsonify({"success": True, "datasets": fallback})
+    return success_response({"datasets": fallback})
 
 
 @app.post('/public/add_dataset')
@@ -1518,15 +1518,69 @@ def run_csv_benchmarks():
             models = _mdl.list_models()
         except Exception:
             return jsonify({"success": False, "error": "Missing models list"}), 400
+
+    # Check cache for a single dataset + single model request
+    force_refresh = bool(data.get('force_refresh', False))
+    if not force_refresh and datasets and len(datasets) == 1 and len(models) == 1:
+        model_name_key = models[0].get('name') or models[0].get('model') or 'model'
+        cache_key = f"{datasets[0]}:{model_name_key}"
+        cached = _STORE["csv_benchmark_cache"].get(cache_key)
+        if cached:
+            age = (datetime.utcnow() - cached["cached_at"]).total_seconds()
+            if age < BENCHMARK_CACHE_TTL:
+                return jsonify({"success": True, "cached": True, "cached_at": cached["cached_at"].isoformat(), **cached["result"]})
+
     try:
         summary = csv_bench.run_benchmarks(models=models, datasets=datasets, sample_size=sample_size)
-        return jsonify({"success": True, **summary})
+
+        # Persist each (dataset, model) result to the in-memory cache
+        for run in summary.get("runs", []):
+            dataset_filename = run.get("dataset")
+            for model_key in run.get("results", {}):
+                cache_key = f"{dataset_filename}:{model_key}"
+                _STORE["csv_benchmark_cache"][cache_key] = {
+                    "result": {"runs": [run]},
+                    "cached_at": datetime.utcnow(),
+                }
+
+        return jsonify({"success": True, "cached": False, **summary})
     except Exception as e:
         logger.exception(
             "CSV benchmarks run failed",
             extra={"event": "unhandled_exception", "endpoint": "run_csv_benchmarks", "error": str(e)},
         )
         return jsonify({"success": False, "error": "Failed to run benchmarks"}), 500
+
+
+@app.get('/public/csv_benchmark_results')
+def get_csv_benchmark_results():
+    """Return cached CSV benchmark results for a given dataset and model.
+
+    Query parameters:
+      dataset  - CSV filename (e.g. ``Commonsense.csv``)
+      model    - model name used in the benchmark run
+    """
+    dataset = request.args.get('dataset', '').strip()
+    model = request.args.get('model', '').strip()
+    if not dataset or not model:
+        return jsonify({"success": False, "error": "Both 'dataset' and 'model' query parameters are required"}), 400
+
+    cache_key = f"{dataset}:{model}"
+    cached = _STORE["csv_benchmark_cache"].get(cache_key)
+    if not cached:
+        return jsonify({"success": False, "error": "No cached results found for the given dataset and model"}), 404
+
+    age = (datetime.utcnow() - cached["cached_at"]).total_seconds()
+    expired = age >= BENCHMARK_CACHE_TTL
+    return jsonify({
+        "success": True,
+        "cached": True,
+        "cached_at": cached["cached_at"].isoformat(),
+        "expired": expired,
+        "ttl_seconds": BENCHMARK_CACHE_TTL,
+        "age_seconds": int(age),
+        **cached["result"],
+    })
 
 
 if __name__ == '__main__':
