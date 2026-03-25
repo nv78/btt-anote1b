@@ -386,8 +386,7 @@ def get_source_sentences():
     selected = pool[start_idx:end_idx]
     sentence_ids = list(range(start_idx, end_idx))
 
-    return jsonify({
-        "success": True,
+    return success_response({
         "dataset_name": dataset_name,
         "sentence_ids": sentence_ids,
         "source_sentences": selected,
