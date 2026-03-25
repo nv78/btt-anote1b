@@ -38,6 +38,18 @@ except ImportError:
         "Install with: pip install Flask-Limiter>=3.5.0"
     )
 
+
+# Optional Flasgger (Swagger UI)
+try:
+    from flasgger import Swagger  # type: ignore
+    FLASGGER_AVAILABLE = True
+except ImportError:
+    FLASGGER_AVAILABLE = False
+    logger.warning(
+        "flasgger not installed; Swagger UI will be disabled. "
+        "Install with: pip install flasgger>=0.9.7"
+    )
+
 # Optional BERTScore
 def _optional_bertscore(predictions, references):
     try:
@@ -103,6 +115,42 @@ else:
                 return f
             return decorator
     limiter = _NoOpLimiter()
+
+
+# ---------------------------
+# Swagger / OpenAPI docs (optional, disabled in production)
+# ---------------------------
+_SWAGGER_ENABLED = (
+    os.getenv('FLASK_ENV', 'development') != 'production'
+    or os.getenv('ENABLE_SWAGGER', '').lower() == 'true'
+)
+
+if FLASGGER_AVAILABLE and _SWAGGER_ENABLED:
+    _swagger_template = {
+        "swagger": "2.0",
+        "info": {
+            "title": "Anote Model Leaderboard API",
+            "description": (
+                "REST API for submitting model predictions, retrieving benchmark results, "
+                "and managing datasets on the Anote Model Leaderboard."
+            ),
+            "version": "0.1.0",
+            "contact": {"email": "support@anote.ai"},
+            "license": {"name": "MIT"},
+        },
+        "basePath": "/",
+        "schemes": ["http", "https"],
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "tags": [
+            {"name": "general", "description": "Health and info endpoints"},
+            {"name": "leaderboard", "description": "Leaderboard retrieval and export"},
+            {"name": "submissions", "description": "Model submission and evaluation"},
+            {"name": "datasets", "description": "Dataset management"},
+        ],
+    }
+    swagger = Swagger(app, template=_swagger_template)
+    logger.info("Swagger UI enabled at /apidocs")
 
 # Lazy import to avoid import-time failures if files not present
 try:
@@ -521,6 +569,7 @@ def export_leaderboard():
 
 @app.post('/public/submit_model')
 @limiter.limit(_RATE_LIMIT_SUBMIT)
+@require_api_key
 def submit_model():
     """Submit model results to a benchmark dataset and compute evaluation.
 
@@ -1088,6 +1137,7 @@ def dataset_details():
 # Leaderboard UI API (per README)
 # ---------------------------
 @app.post('/api/leaderboard/add_dataset')
+@require_api_key
 def add_dataset():
     data = request.get_json(silent=True) or {}
     required = ["name", "task_type"]

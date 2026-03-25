@@ -64,13 +64,33 @@ class LeaderboardClient:
         qs = _u.urlencode({"dataset_name": dataset_name, "count": count, "start_idx": start_idx})
         return self._request("GET", f"/public/get_source_sentences?{qs}")
 
-    def submit_model(self, benchmark_dataset_name: str, model_name: str, model_results: list[str], sentence_ids: list[int]) -> Dict[str, Any]:
-        payload = {
+    def submit_model(
+        self,
+        benchmark_dataset_name: str,
+        model_name: str,
+        model_results: list[str],
+        sentence_ids: list[int],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Submit model predictions for scoring.
+
+        Args:
+            benchmark_dataset_name: Name of the benchmark dataset.
+            model_name: Name of the model being evaluated.
+            model_results: List of model prediction strings.
+            sentence_ids: List of sentence IDs corresponding to model_results.
+            metadata: Optional dict of submission metadata (e.g. version, paper_link,
+                      hardware, reproducibility notes). Must be JSON-serializable and
+                      at most 4096 bytes when serialized.
+        """
+        payload: Dict[str, Any] = {
             "benchmarkDatasetName": benchmark_dataset_name,
             "modelName": model_name,
             "modelResults": model_results,
             "sentence_ids": sentence_ids,
         }
+        if metadata is not None:
+            payload["metadata"] = metadata
         return self._request("POST", "/public/submit_model", json=payload)
 
     # CSV benchmarks
