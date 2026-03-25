@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  db:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: agents
+    volumes:
+      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    # Optionally copy backend/.env.example to backend/.env and add API keys
+    # env_file:
+    #   - backend/.env
+    environment:
+      DB_HOST: db
+      DB_USER: root
+      DB_PASSWORD: rootpassword
+      DB_NAME: agents
+      DB_PORT: "3306"
+      PORT: "5001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_ENDPOINT: http://localhost:5001
+
+volumes:
+  db_data:
