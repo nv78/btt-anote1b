@@ -1649,7 +1649,7 @@ def run_csv_benchmarks():
       }
     """
     if not csv_bench:
-        return jsonify({"success": False, "error": "CSV benchmark module unavailable"}), 500
+        return error_response("CSV benchmark module unavailable", code="MODULE_UNAVAILABLE", status=500)
     data = request.get_json(silent=True) or {}
     models = data.get('models') or []
     datasets = data.get('datasets')
@@ -1660,7 +1660,7 @@ def run_csv_benchmarks():
             import models as _mdl  # type: ignore
             models = _mdl.list_models()
         except Exception:
-            return jsonify({"success": False, "error": "Missing models list"}), 400
+            return error_response("Missing models list", code="MISSING_FIELDS")
 
     # Check cache for a single dataset + single model request
     force_refresh = bool(data.get('force_refresh', False))
@@ -1671,7 +1671,7 @@ def run_csv_benchmarks():
         if cached:
             age = (datetime.utcnow() - cached["cached_at"]).total_seconds()
             if age < BENCHMARK_CACHE_TTL:
-                return jsonify({"success": True, "cached": True, "cached_at": cached["cached_at"].isoformat(), **cached["result"]})
+                return success_response({"cached": True, "cached_at": cached["cached_at"].isoformat(), **cached["result"]})
 
     try:
         summary = csv_bench.run_benchmarks(models=models, datasets=datasets, sample_size=sample_size)
@@ -1686,13 +1686,13 @@ def run_csv_benchmarks():
                     "cached_at": datetime.utcnow(),
                 }
 
-        return jsonify({"success": True, "cached": False, **summary})
+        return success_response({"cached": False, **summary})
     except Exception as e:
         logger.exception(
             "CSV benchmarks run failed",
             extra={"event": "unhandled_exception", "endpoint": "run_csv_benchmarks", "error": str(e)},
         )
-        return jsonify({"success": False, "error": "Failed to run benchmarks"}), 500
+        return error_response("Failed to run benchmarks", code="BENCHMARK_ERROR", status=500)
 
 
 @app.get('/public/csv_benchmark_results')
@@ -1706,17 +1706,16 @@ def get_csv_benchmark_results():
     dataset = request.args.get('dataset', '').strip()
     model = request.args.get('model', '').strip()
     if not dataset or not model:
-        return jsonify({"success": False, "error": "Both 'dataset' and 'model' query parameters are required"}), 400
+        return error_response("Both 'dataset' and 'model' query parameters are required", code="MISSING_FIELDS")
 
     cache_key = f"{dataset}:{model}"
     cached = _STORE["csv_benchmark_cache"].get(cache_key)
     if not cached:
-        return jsonify({"success": False, "error": "No cached results found for the given dataset and model"}), 404
+        return error_response("No cached results found for the given dataset and model", code="NOT_FOUND", status=404)
 
     age = (datetime.utcnow() - cached["cached_at"]).total_seconds()
     expired = age >= BENCHMARK_CACHE_TTL
-    return jsonify({
-        "success": True,
+    return success_response({
         "cached": True,
         "cached_at": cached["cached_at"].isoformat(),
         "expired": expired,
