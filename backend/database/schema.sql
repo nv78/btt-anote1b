@@ -214,9 +214,12 @@ CREATE TABLE model_submissions (
     model_name VARCHAR(255) NOT NULL,
     submitted_by VARCHAR(255) NOT NULL,
     model_results LONGTEXT NOT NULL,
+    metadata JSON NULL,
     created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (benchmark_dataset_id) REFERENCES benchmark_datasets(id)
 );
+
+ALTER TABLE model_submissions ADD COLUMN IF NOT EXISTS metadata JSON NULL;
 
 CREATE TABLE evaluation_results (
     id INTEGER PRIMARY KEY AUTO_INCREMENT,

@@ -282,7 +282,7 @@ def get_leaderboard():
 
             query = (
                 "SELECT ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
-                "er.score, ms.created AS submitted_at "
+                "er.score, ms.created AS submitted_at, ms.metadata "
                 "FROM model_submissions ms "
                 "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
                 "JOIN evaluation_results er ON er.model_submission_id = ms.id "
@@ -294,7 +294,7 @@ def get_leaderboard():
             rows = cursor.fetchall()
             leaderboard = []
             for i, row in enumerate(rows):
-                leaderboard.append({
+                entry: Dict[str, Any] = {
                     "rank": offset + i + 1,
                     "model_name": row['model_name'],
                     "dataset_name": row['dataset_name'],
@@ -302,7 +302,14 @@ def get_leaderboard():
                     "evaluation_metric": row.get('evaluation_metric'),
                     "score": float(row['score']),
                     "submitted_at": row['submitted_at'].isoformat() if row.get('submitted_at') else None,
-                })
+                }
+                raw_meta = row.get('metadata')
+                if raw_meta is not None:
+                    try:
+                        entry["metadata"] = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        pass
+                leaderboard.append(entry)
             return jsonify({
                 "success": True,
                 "results": leaderboard,
@@ -492,12 +499,26 @@ def submit_model():
     model_name = data.get('modelName')
     model_results = data.get('modelResults')
     sentence_ids = data.get('sentence_ids')
+    metadata = data.get('metadata')
 
     if not all([benchmark_dataset_name, model_name, isinstance(model_results, list), isinstance(sentence_ids, list)]):
         return jsonify({
             "success": False,
             "error": "Missing required fields: benchmarkDatasetName, modelName, modelResults (list), sentence_ids (list)",
         }), 400
+
+    # Validate optional metadata field
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            return jsonify({"success": False, "error": "metadata must be a JSON object (dict)"}), 400
+        try:
+            metadata_json = json.dumps(metadata)
+        except (TypeError, ValueError) as exc:
+            return jsonify({"success": False, "error": f"metadata is not JSON-serializable: {exc}"}), 400
+        if len(metadata_json.encode('utf-8')) > 4096:
+            return jsonify({"success": False, "error": "metadata exceeds maximum size of 4096 bytes"}), 400
+    else:
+        metadata_json = None
 
     try:
         benchmark_dataset_name = validate_name(benchmark_dataset_name, 'benchmarkDatasetName')
@@ -726,9 +747,9 @@ def submit_model():
                 dataset_id = cursor.lastrowid
 
             cursor.execute(
-                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results) "
-                "VALUES (%s, %s, %s, %s)",
-                (dataset_id, model_name, 'public@anote.ai', json.dumps(model_results))
+                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results, metadata) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (dataset_id, model_name, 'public@anote.ai', json.dumps(model_results), metadata_json)
             )
             submission_id = cursor.lastrowid
 
@@ -778,6 +799,7 @@ def submit_model():
             "benchmark_dataset_name": benchmark_dataset_name,
             "model_name": model_name,
             "results": model_results,
+            "metadata": metadata,
             "created": datetime.utcnow(),
         })
         _STORE["evaluations"].append({
@@ -799,7 +821,10 @@ def submit_model():
             },
         )
 
-    return jsonify({"success": True, "score": float(score)})
+    response: Dict[str, Any] = {"success": True, "score": float(score)}
+    if metadata is not None:
+        response["metadata"] = metadata
+    return jsonify(response)
 
 
 # ---------------------------
