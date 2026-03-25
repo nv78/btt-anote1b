@@ -1622,13 +1622,13 @@ def list_benchmark_models():
     try:
         import models as _mdl  # type: ignore
         models = _mdl.list_models()
-        return jsonify({"success": True, "models": models})
+        return success_response({"models": models})
     except Exception as e:
         logger.error(
             "Failed to retrieve model list",
             extra={"event": "unhandled_exception", "endpoint": "list_benchmark_models", "error": str(e)},
         )
-        return jsonify({"success": False, "error": "Model list unavailable"}), 500
+        return error_response("Model list unavailable", code="MODULE_UNAVAILABLE", status=500)
 
 
 @app.post('/public/run_csv_benchmarks')
