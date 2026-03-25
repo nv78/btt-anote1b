@@ -256,12 +256,30 @@ def get_source_sentences():
 def get_leaderboard():
     """Get leaderboard showing model submissions and scores.
     Supports DB if configured, otherwise returns in-memory results.
+
+    Query params:
+        page      (int, default 1)             — 1-based page number
+        page_size (int, default 25, max 100)   — results per page
     """
-    limit = int(request.args.get('limit', 100))
+    page = max(1, int(request.args.get('page', 1)))
+    page_size = min(100, max(1, int(request.args.get('page_size', 25))))
+    offset = (page - 1) * page_size
+
     conn, cursor = get_db_connection()
 
     if conn and cursor:
         try:
+            # Get total count first
+            count_query = (
+                "SELECT COUNT(*) AS total "
+                "FROM model_submissions ms "
+                "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                "WHERE bd.active = TRUE"
+            )
+            cursor.execute(count_query)
+            total = cursor.fetchone()['total']
+
             query = (
                 "SELECT ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
                 "er.score, ms.created AS submitted_at "
@@ -270,14 +288,14 @@ def get_leaderboard():
                 "JOIN evaluation_results er ON er.model_submission_id = ms.id "
                 "WHERE bd.active = TRUE "
                 "ORDER BY bd.name, er.score DESC "
-                "LIMIT %s"
+                "LIMIT %s OFFSET %s"
             )
-            cursor.execute(query, (limit,))
+            cursor.execute(query, (page_size, offset))
             rows = cursor.fetchall()
             leaderboard = []
             for i, row in enumerate(rows):
                 leaderboard.append({
-                    "rank": i + 1,
+                    "rank": offset + i + 1,
                     "model_name": row['model_name'],
                     "dataset_name": row['dataset_name'],
                     "task_type": row.get('task_type'),
@@ -285,7 +303,13 @@ def get_leaderboard():
                     "score": float(row['score']),
                     "submitted_at": row['submitted_at'].isoformat() if row.get('submitted_at') else None,
                 })
-            return jsonify({"success": True, "leaderboard": leaderboard})
+            return jsonify({
+                "success": True,
+                "results": leaderboard,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+            })
         except Exception as e:
             logger.error(
                 "Error reading leaderboard from DB",
@@ -293,6 +317,38 @@ def get_leaderboard():
             )
         finally:
             try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    # In-memory fallback
+    all_entries = sorted(_STORE["evaluations"], key=lambda x: x["score"], reverse=True)
+    total = len(all_entries)
+    page_entries = all_entries[offset: offset + page_size]
+    leaderboard = []
+    for i, ev in enumerate(page_entries):
+        sub = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
+        if not sub:
+            continue
+        leaderboard.append({
+            "rank": offset + i + 1,
+            "model_name": sub["model_name"],
+            "dataset_name": sub["benchmark_dataset_name"],
+            "task_type": "translation",
+            "evaluation_metric": ev["metric"],
+            "score": ev["score"],
+            "submitted_at": sub["created"].isoformat(),
+        })
+    return jsonify({
+        "success": True,
+        "results": leaderboard,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    })
+
+
 
 @app.get('/public/export/leaderboard')
 def export_leaderboard():
@@ -416,30 +472,6 @@ def export_leaderboard():
             'Content-Length': str(len(json_bytes)),
         },
     )
-
-
-                cursor.close()
-                conn.close()
-            except Exception:
-                pass
-
-    # In-memory fallback
-    mem = sorted(_STORE["evaluations"], key=lambda x: x["score"], reverse=True)[:limit]
-    leaderboard = []
-    for i, ev in enumerate(mem):
-        sub = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
-        if not sub:
-            continue
-        leaderboard.append({
-            "rank": i + 1,
-            "model_name": sub["model_name"],
-            "dataset_name": sub["benchmark_dataset_name"],
-            "task_type": "translation",
-            "evaluation_metric": ev["metric"],
-            "score": ev["score"],
-            "submitted_at": sub["created"].isoformat(),
-        })
-    return jsonify({"success": True, "leaderboard": leaderboard})
 
 
 @app.post('/public/submit_model')
