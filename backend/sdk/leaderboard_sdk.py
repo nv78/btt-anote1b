@@ -54,8 +54,10 @@ class LeaderboardClient:
         return self._request("POST", "/public/add_dataset", json=payload)
 
     # Evaluation endpoints (optional)
-    def get_leaderboard(self) -> Dict[str, Any]:
-        return self._request("GET", "/public/get_leaderboard")
+    def get_leaderboard(self, page: int = 1, page_size: int = 25) -> Dict[str, Any]:
+        import urllib.parse as _u
+        qs = _u.urlencode({"page": page, "page_size": page_size})
+        return self._request("GET", f"/public/get_leaderboard?{qs}")
 
     def get_source_sentences(self, dataset_name: str = "flores_spanish_translation", count: int = 3, start_idx: int = 0) -> Dict[str, Any]:
         import urllib.parse as _u

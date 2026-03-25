@@ -1087,6 +1087,15 @@ const Leaderboard = () => {
               >
                 Details
               </button>
+              <a
+                href={`${API_BASE}/public/export/leaderboard?dataset=${encodeURIComponent(dataset.name)}&format=csv`}
+                download={`leaderboard-${dataset.name}.csv`}
+                className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-full border border-green-500/60 text-green-300 hover:bg-green-500/10 transition-colors"
+                aria-label={`Download CSV for ${dataset.name}`}
+              >
+                Download CSV
+                <span aria-hidden>&#8595;</span>
+              </a>
             </div>
 
             <div className="overflow-hidden rounded-lg border border-gray-800">
