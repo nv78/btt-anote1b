@@ -1290,7 +1290,7 @@ def dataset_details():
     """Return detailed information about a dataset, including curation meta and top models."""
     name = request.args.get('name')
     if not name:
-        return jsonify({"success": False, "error": "Missing name"}), 400
+        return error_response("Missing name", code="MISSING_FIELDS")
 
     # Try DB first
     conn, cursor = get_db_connection()
@@ -1299,7 +1299,7 @@ def dataset_details():
             cursor.execute("SELECT id, name, task_type, evaluation_metric, reference_data, created, active FROM benchmark_datasets WHERE name = %s", (name,))
             ds = cursor.fetchone()
             if not ds:
-                return jsonify({"success": False, "error": "Dataset not found"}), 404
+                return error_response("Dataset not found", code="NOT_FOUND", status=404)
             meta = {}
             examples = []
             count = None
@@ -1329,8 +1329,7 @@ def dataset_details():
                     "updated": r['submitted_at'].isoformat() if r.get('submitted_at') else None
                 } for r in rows
             ]
-            return jsonify({
-                "success": True,
+            return success_response({
                 "dataset": {
                     "name": ds['name'],
                     "task_type": ds['task_type'],
@@ -1352,7 +1351,7 @@ def dataset_details():
     if not matched and name.startswith('flores_spanish_translation'):
         matched = {"name": name, "task_type": "translation", "evaluation_metric": "bleu", "description": "FLORES-style demo", "url": None}
     if not matched:
-        return jsonify({"success": False, "error": "Dataset not found"}), 404
+        return error_response("Dataset not found", code="NOT_FOUND", status=404)
     # Gather top models from memory store
     mem = []
     for ev in _STORE['evaluations']:
@@ -1361,8 +1360,7 @@ def dataset_details():
             mem.append({"model": sub['model_name'], "score": ev['score'], "updated": sub['created'].isoformat()})
     mem.sort(key=lambda x: x['score'], reverse=True)
     examples = _SPANISH_REFERENCES[:5]
-    return jsonify({
-        "success": True,
+    return success_response({
         "dataset": {
             "name": matched.get('name'),
             "task_type": matched.get('task_type', 'translation'),
