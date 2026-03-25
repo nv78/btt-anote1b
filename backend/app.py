@@ -187,7 +187,7 @@ def require_api_key(f):
             return f(*args, **kwargs)
         provided_key = request.headers.get('X-API-Key', '')
         if provided_key not in _VALID_API_KEYS:
-            return jsonify({"success": False, "error": "Unauthorized"}), 401
+            return jsonify({"ok": False, "error": {"code": "UNAUTHORIZED", "message": "Unauthorized"}}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -348,7 +348,7 @@ def get_source_sentences():
         count = int(request.args.get('count', 3))
         start_idx = int(request.args.get('start_idx', 0))
     except ValueError:
-        return jsonify({"success": False, "error": "Invalid count or start_idx"}), 400
+        return error_response("Invalid count or start_idx", code="INVALID_PARAM")
 
     # Try to pull from DB reference_data if available
     pool = None
@@ -554,11 +554,42 @@ def get_leaderboard():
 
 @app.get('/public/export/leaderboard')
 def export_leaderboard():
-    """Export leaderboard data as CSV or JSON.
-
-    Query params:
-      - dataset (optional): filter by dataset name
-      - format (optional): 'csv' or 'json' (default 'json')
+    """Export leaderboard data as a downloadable CSV or JSON file.
+    ---
+    tags:
+      - leaderboard
+    summary: Export leaderboard data
+    parameters:
+      - name: dataset
+        in: query
+        type: string
+        required: false
+        description: Filter results to a specific dataset name
+      - name: format
+        in: query
+        type: string
+        enum: [json, csv]
+        default: json
+        description: Output format — json or csv
+    produces:
+      - application/json
+      - text/csv
+    responses:
+      200:
+        description: >
+          Leaderboard export file. Content-Type is text/csv or application/json
+          depending on the format parameter. Includes a Content-Disposition header
+          to trigger a browser download.
+      400:
+        description: Invalid format parameter
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
     """
     dataset_filter = request.args.get('dataset', '').strip()
     fmt = request.args.get('format', 'json').strip().lower()
@@ -680,15 +711,87 @@ def export_leaderboard():
 @limiter.limit(_RATE_LIMIT_SUBMIT)
 @require_api_key
 def submit_model():
-    """Submit model results to a benchmark dataset and compute evaluation.
-
-    Expected JSON:
-    {
-      "benchmarkDatasetName": "flores_spanish_translation",
-      "modelName": "my-model-v1",
-      "modelResults": ["Traducción 1", ...],
-      "sentence_ids": [0, 1, 2]
-    }
+    """Submit model predictions to a benchmark dataset and receive an evaluation score.
+    ---
+    tags:
+      - submissions
+    summary: Submit model predictions for evaluation
+    description: >
+      Accepts model predictions alongside sentence IDs, evaluates them against
+      reference data using the appropriate metric (BLEU, BERTScore, accuracy, F1),
+      and persists the result to the leaderboard.
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - benchmarkDatasetName
+            - modelName
+            - modelResults
+            - sentence_ids
+          properties:
+            benchmarkDatasetName:
+              type: string
+              example: flores_spanish_translation
+              description: Name of the benchmark dataset to evaluate against
+            modelName:
+              type: string
+              example: my-model-v1
+              description: Display name for this model submission
+            modelResults:
+              type: array
+              items:
+                type: string
+              example: ["Esta es una frase de ejemplo.", "La investigación está en curso."]
+              description: Model predictions, one per sentence_id
+            sentence_ids:
+              type: array
+              items:
+                type: integer
+              example: [0, 1]
+              description: Indices of the source sentences that were translated/answered
+            submittedBy:
+              type: string
+              example: user@example.com
+              description: Optional submitter email
+            metadata:
+              type: object
+              description: Optional extra metadata (max 4096 bytes when JSON-serialised)
+    responses:
+      200:
+        description: Evaluation completed successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            score:
+              type: number
+              format: float
+              example: 0.42
+      400:
+        description: Validation error (missing fields, length mismatch, etc.)
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+      500:
+        description: Evaluation failed
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
     """
     data = request.get_json(silent=True) or {}
     benchmark_dataset_name = data.get('benchmarkDatasetName')
