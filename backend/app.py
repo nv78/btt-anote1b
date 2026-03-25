@@ -1384,11 +1384,11 @@ def add_dataset():
     required = ["name", "task_type"]
     missing = [k for k in required if k not in data]
     if missing:
-        return jsonify({"status": "error", "message": f"Missing required fields: {', '.join(missing)}"}), 400
+        return error_response(f"Missing required fields: {', '.join(missing)}", code="MISSING_FIELDS")
     try:
         dataset_name_val = validate_name(data["name"], 'name')
     except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        return error_response(str(exc), code="INVALID_PARAM")
     dataset_id = str(uuid.uuid4())
     new_ds = {
         "id": dataset_id,
@@ -1403,8 +1403,7 @@ def add_dataset():
         "Dataset added to leaderboard (in-memory)",
         extra={"event": "dataset_creation", "name": dataset_name_val, "task_type": data["task_type"], "dataset_id": dataset_id, "storage": "memory"},
     )
-    return jsonify({
-        "status": "success",
+    return success_response({
         "message": "Dataset added to leaderboard.",
         "dataset_id": dataset_id,
     })
@@ -1417,12 +1416,12 @@ def add_model():
     required = ["dataset_name", "model", "rank", "score", "updated"]
     missing = [k for k in required if k not in data]
     if missing:
-        return jsonify({"status": "error", "message": f"Missing required fields: {', '.join(missing)}"}), 400
+        return error_response(f"Missing required fields: {', '.join(missing)}", code="MISSING_FIELDS")
     try:
         dataset_name_val = validate_name(data["dataset_name"], 'dataset_name')
         model_name_val = validate_name(data["model"], 'model')
     except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        return error_response(str(exc), code="INVALID_PARAM")
     for ds in LEADERBOARD_DATA:
         if ds.get("name") == dataset_name_val:
             ds.setdefault("models", []).append({
@@ -1434,8 +1433,8 @@ def add_model():
             })
             # keep models sorted by rank
             ds["models"].sort(key=lambda m: (m.get("rank") is None, m.get("rank")))
-            return jsonify({"status": "success", "message": "Model added to dataset on leaderboard."})
-    return jsonify({"status": "error", "message": "Dataset not found."}), 404
+            return success_response({"message": "Model added to dataset on leaderboard."})
+    return error_response("Dataset not found.", code="NOT_FOUND", status=404)
 
 
 @app.get('/api/leaderboard/list')
@@ -1448,10 +1447,7 @@ def list_leaderboard_datasets():
       "datasets": [ { id, name, url, task_type, description, models: [...] }, ... ]
     }
     """
-    return jsonify({
-        "status": "success",
-        "datasets": LEADERBOARD_DATA,
-    })
+    return success_response({"datasets": LEADERBOARD_DATA})
 
 
 # ---------------------------
