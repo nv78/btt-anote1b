@@ -43,14 +43,16 @@ function LandingPage() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       var path = "lp" + window.location.pathname + window.location.search;
-      window.gtag("event", "page_view", {
-        page_path: path,
-      });
+      if (typeof window.gtag === "function") {
+        window.gtag("event", "page_view", {
+          page_path: path,
+        });
+      }
       if (isLoggedIn) {
         // dispatch(createVisit(path));
       }
     }
-  }, [location]);
+  }, [location, isLoggedIn]);
 
   let robotMetaTag = robotHeader();
 

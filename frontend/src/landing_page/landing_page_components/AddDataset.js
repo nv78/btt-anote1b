@@ -16,14 +16,49 @@ const emptyForm = {
   hf_limit: 100,
 };
 
+const popularDatasets = [
+  { name: "ag_news", task_type: "text_classification", description: "AG News classification" },
+  { name: "imdb", task_type: "text_classification", description: "Movie review sentiment" },
+  { name: "squad", task_type: "document_qa", description: "Extractive QA" },
+  { name: "conll2003", task_type: "named_entity_recognition", description: "Named entity recognition" },
+  { name: "financial_phrasebank", task_type: "text_classification", description: "Financial sentiment" },
+];
+
+const emptyRows = [{ source: "", answer: "" }];
+
 const AddDataset = () => {
   const [form, setForm] = useState(emptyForm);
+  const [rows, setRows] = useState(emptyRows);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const updateRow = (index, key, value) => {
+    setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)));
+  };
+  const addRow = () => setRows((current) => [...current, { source: "", answer: "" }]);
+  const removeRow = (index) => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
+
+  const referenceDataFromRows = () => {
+    const cleanRows = rows.filter((row) => row.source.trim() && row.answer.trim());
+    const referenceData = {
+      description: form.description || undefined,
+      url: form.url || undefined,
+      source_texts: cleanRows.map((row) => row.source.trim()),
+    };
+    if (form.task_type === "text_classification") {
+      referenceData.labels = cleanRows.map((row) => row.answer.trim());
+    } else if (form.task_type === "named_entity_recognition") {
+      referenceData.entities = cleanRows.map((row) => row.answer.split(";").map((value) => value.trim()).filter(Boolean));
+    } else if (form.task_type === "translation") {
+      referenceData.reference_translations = cleanRows.map((row) => row.answer.trim());
+    } else {
+      referenceData.answers = cleanRows.map((row) => row.answer.trim());
+    }
+    return referenceData;
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -47,14 +82,13 @@ const AddDataset = () => {
           task_type: form.task_type,
           evaluation_metric: form.evaluation_metric,
           reference_data: {
-            description: form.description || undefined,
-            url: form.url || undefined,
-            source_texts: [],
+            ...referenceDataFromRows(),
           },
         });
         setMessage(`Created ${form.name}`);
       }
       setForm(emptyForm);
+      setRows(emptyRows);
     } catch (err) {
       setError(err.message || "Failed to create dataset");
     } finally {
@@ -116,48 +150,69 @@ const AddDataset = () => {
           </div>
 
           {form.source === "huggingface" ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <>
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Dataset ID</label>
-                <input
-                  placeholder="ag_news"
-                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
-                  value={form.hf_dataset}
-                  onChange={(event) => update("hf_dataset", event.target.value)}
-                  required
-                />
+                <label className="block text-sm text-gray-300 mb-2">Popular Datasets</label>
+                <div className="flex flex-wrap gap-2">
+                  {popularDatasets.map((dataset) => (
+                    <button
+                      key={dataset.name}
+                      type="button"
+                      title={dataset.description}
+                      className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-gray-900"
+                      onClick={() => {
+                        update("hf_dataset", dataset.name);
+                        update("task_type", dataset.task_type);
+                      }}
+                    >
+                      {dataset.name}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Config</label>
-                <input
-                  placeholder="optional"
-                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
-                  value={form.hf_config}
-                  onChange={(event) => update("hf_config", event.target.value)}
-                />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Dataset ID</label>
+                  <input
+                    placeholder="ag_news"
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_dataset}
+                    onChange={(event) => update("hf_dataset", event.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Config</label>
+                  <input
+                    placeholder="optional"
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_config}
+                    onChange={(event) => update("hf_config", event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Split</label>
+                  <input
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_split}
+                    onChange={(event) => update("hf_split", event.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Max Samples</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="5000"
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_limit}
+                    onChange={(event) => update("hf_limit", event.target.value)}
+                    required
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Split</label>
-                <input
-                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
-                  value={form.hf_split}
-                  onChange={(event) => update("hf_split", event.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Max Samples</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="5000"
-                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
-                  value={form.hf_limit}
-                  onChange={(event) => update("hf_limit", event.target.value)}
-                  required
-                />
-              </div>
-            </div>
+            </>
           ) : (
             <>
               <div>
@@ -189,6 +244,44 @@ const AddDataset = () => {
                   value={form.description}
                   onChange={(event) => update("description", event.target.value)}
                 />
+              </div>
+              <div className="border border-gray-800 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm text-gray-300">Ground Truth Rows</label>
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-gray-900"
+                    onClick={addRow}
+                  >
+                    Add Row
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {rows.map((row, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+                      <input
+                        placeholder="Question, source text, or document"
+                        className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                        value={row.source}
+                        onChange={(event) => updateRow(index, "source", event.target.value)}
+                      />
+                      <input
+                        placeholder="Label, answer, translation, or entities separated by semicolons"
+                        className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                        value={row.answer}
+                        onChange={(event) => updateRow(index, "answer", event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="px-3 py-2 rounded border border-gray-700 text-gray-400 hover:bg-gray-900"
+                        onClick={() => removeRow(index)}
+                        disabled={rows.length === 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </>
           )}
