@@ -9,6 +9,7 @@ const DatasetDetails = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [metrics, setMetrics] = useState({});
 
   useEffect(() => {
     let ignore = false;
@@ -21,6 +22,13 @@ const DatasetDetails = () => {
         const json = await res.json();
         if (!res.ok || json.success !== true) throw new Error(json.error || 'Failed to fetch dataset');
         if (!ignore) setData(json);
+        if (json.dataset?.task_type) {
+          const metricsRes = await fetch(`${API_BASE}/api/metrics/task/${encodeURIComponent(json.dataset.task_type)}`);
+          const metricsJson = await metricsRes.json();
+          if (!ignore && metricsRes.ok && metricsJson.success === true) {
+            setMetrics(metricsJson.metrics || {});
+          }
+        }
       } catch (e) {
         if (!ignore) setError(e.message || 'Error loading dataset');
       } finally {
@@ -59,6 +67,20 @@ const DatasetDetails = () => {
                 </ul>
               </div>
             )}
+            {Object.keys(metrics).length > 0 && (
+              <div className="mt-6">
+                <div className="text-white font-semibold mb-2">Metrics</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {Object.entries(metrics).map(([key, metric]) => (
+                    <div key={key} className="border border-gray-800 rounded-lg p-3 bg-gray-950">
+                      <div className="text-[#EDDC8F] font-semibold">{metric.name || key}</div>
+                      <div className="text-gray-300 text-sm mt-1">{metric.description}</div>
+                      <div className="text-gray-500 text-xs mt-2">{metric.range}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="mt-6">
               <div className="text-white font-semibold mb-2">Top Models</div>
               {data.top_models && data.top_models.length ? (
@@ -86,4 +108,3 @@ const DatasetDetails = () => {
 };
 
 export default DatasetDetails;
-

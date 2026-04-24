@@ -1,0 +1,18 @@
+site_name: Anote Leaderboard
+site_description: Local and API documentation for the Anote model leaderboard.
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.instant
+    - content.code.copy
+nav:
+  - Home: index.md
+  - Running Locally: running-locally.md
+  - API Usage: api.md
+  - Hugging Face Imports: huggingface-imports.md
+  - Operations: operations.md
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences

@@ -57,6 +57,17 @@ try:
 except Exception:
     csv_bench = None
 
+try:
+    from metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+except Exception:
+    try:
+        from backend.metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+    except Exception:
+        METRICS_CATALOG = {}
+
+        def metrics_for_task(_task_type):
+            return {}
+
 
 # Root welcome endpoint for quick sanity check
 @app.get('/')
@@ -106,6 +117,7 @@ def _get_bleu(translations, references, weights=(0.5, 0.5, 0, 0)):
 _STORE = {
     "submissions": [],  # {id, benchmark_dataset_name, model_name, results, created}
     "evaluations": [],  # {submission_id, score, metric, created}
+    "datasets": [],  # {name, task_type, evaluation_metric, reference_data}
 }
 
 # UI-oriented datasets store (for add_dataset/add_model endpoints)
@@ -291,6 +303,9 @@ def submit_model():
             except Exception:
                 pass
 
+    if not dataset:
+        dataset = next((d for d in _STORE["datasets"] if d.get("name") == benchmark_dataset_name), None)
+
     task_type = None
     metric = None
     reference_sentences = None
@@ -407,7 +422,7 @@ def submit_model():
                 parts = [p.strip() for p in str(out).split(';') if p and str(p).strip()]
                 pred_lists.append(parts)
             score = _f1_entities(reference_entities, pred_lists)
-        elif tt in ('chatbot', 'prompting', 'qa'):
+        elif tt in ('chatbot', 'prompting', 'qa', 'document_qa', 'line_qa'):
             if not reference_answers:
                 return jsonify({"success": False, "error": "Dataset does not have reference answers"}), 400
             metric = (metric or 'exact').lower()
@@ -563,6 +578,16 @@ def list_public_datasets():
             "url": ds.get("url"),
             "description": ds.get("description"),
         })
+    for ds in _STORE["datasets"]:
+        rd = ds.get("reference_data") if isinstance(ds.get("reference_data"), dict) else {}
+        fallback.append({
+            "name": ds.get("name"),
+            "task_type": ds.get("task_type"),
+            "evaluation_metric": ds.get("evaluation_metric", ""),
+            "url": rd.get("url"),
+            "description": rd.get("description"),
+            "size": len(rd.get("source_texts", [])) if isinstance(rd.get("source_texts"), list) else None,
+        })
     return jsonify({"success": True, "datasets": fallback})
 
 
@@ -593,6 +618,15 @@ def add_dataset_public():
     conn, cursor = get_db_connection()
     if not (conn and cursor):
         # In-memory: store a shadow dataset in curated data for dev
+        existing = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+        if existing:
+            return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+        _STORE["datasets"].append({
+            "name": name,
+            "task_type": task_type,
+            "evaluation_metric": evaluation_metric,
+            "reference_data": reference_data,
+        })
         LEADERBOARD_DATA.append({
             "id": str(uuid.uuid4()),
             "name": name,
@@ -686,6 +720,18 @@ def dataset_details():
 
     # Fallback: find in curated list and memory submissions
     matched = next((d for d in LEADERBOARD_DATA if d.get('name') == name), None)
+    stored = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+    if stored:
+        rd = stored.get("reference_data") if isinstance(stored.get("reference_data"), dict) else {}
+        matched = {
+            "name": stored.get("name"),
+            "task_type": stored.get("task_type"),
+            "evaluation_metric": stored.get("evaluation_metric"),
+            "url": rd.get("url"),
+            "description": rd.get("description"),
+            "size": len(rd.get("source_texts", [])) if isinstance(rd.get("source_texts"), list) else None,
+            "examples": rd.get("source_texts", [])[:5] if isinstance(rd.get("source_texts"), list) else [],
+        }
     if not matched and name.startswith('flores_spanish_translation'):
         matched = {"name": name, "task_type": "translation", "evaluation_metric": "bleu", "description": "FLORES-style demo", "url": None}
     if not matched:
@@ -697,7 +743,7 @@ def dataset_details():
         if sub and sub['benchmark_dataset_name'] == name:
             mem.append({"model": sub['model_name'], "score": ev['score'], "updated": sub['created'].isoformat()})
     mem.sort(key=lambda x: x['score'], reverse=True)
-    examples = _SPANISH_REFERENCES[:5]
+    examples = matched.get("examples") or _SPANISH_REFERENCES[:5]
     return jsonify({
         "success": True,
         "dataset": {
@@ -710,6 +756,93 @@ def dataset_details():
             "examples": examples,
         },
         "top_models": mem[:10],
+    })
+
+
+@app.get('/api/metrics')
+def list_metrics():
+    """Return metric metadata for UI help text and docs clients."""
+    return jsonify({"success": True, "metrics": METRICS_CATALOG})
+
+
+@app.get('/api/metrics/task/<task_type>')
+def list_task_metrics(task_type):
+    """Return recommended metrics for a specific task type."""
+    return jsonify({"success": True, "task_type": task_type, "metrics": metrics_for_task(task_type)})
+
+
+@app.post('/public/import_hf_dataset')
+def import_hf_dataset_public():
+    """Import a bounded Hugging Face dataset split into benchmark_datasets/reference_data."""
+    data = request.get_json(silent=True) or {}
+    try:
+        try:
+            from hf_importer import import_hf_dataset  # type: ignore
+        except Exception:
+            from backend.hf_importer import import_hf_dataset  # type: ignore
+        payload = import_hf_dataset(
+            dataset_name=data.get("dataset_name") or data.get("name"),
+            config=data.get("config"),
+            split=data.get("split", "test"),
+            limit=int(data.get("limit", 100)),
+            task_type=data.get("task_type"),
+            display_name=data.get("display_name"),
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    if data.get("preview_only"):
+        preview = dict(payload)
+        rd = dict(preview.get("reference_data") or {})
+        rd["source_texts"] = rd.get("source_texts", [])[:5]
+        rd["ground_truth"] = rd.get("ground_truth", [])[:5]
+        preview["reference_data"] = rd
+        return jsonify({"success": True, "dataset": preview})
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "INSERT INTO benchmark_datasets (name, task_type, evaluation_metric, reference_data, active) VALUES (%s, %s, %s, %s, TRUE)",
+                (
+                    payload["name"],
+                    payload["task_type"],
+                    payload["evaluation_metric"],
+                    json.dumps(payload["reference_data"]),
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            if 'Duplicate' in str(e) or 'UNIQUE' in str(e):
+                return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+            return jsonify({"success": False, "error": "Failed to import dataset"}), 500
+        finally:
+            try:
+                cursor.close(); conn.close()
+            except Exception:
+                pass
+    else:
+        if any(d.get("name") == payload["name"] for d in _STORE["datasets"]):
+            return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+        _STORE["datasets"].append(payload)
+        LEADERBOARD_DATA.append({
+            "id": str(uuid.uuid4()),
+            "name": payload["name"],
+            "task_type": payload["task_type"],
+            "description": payload["reference_data"].get("description"),
+            "url": payload["reference_data"].get("url"),
+            "models": [],
+        })
+
+    return jsonify({
+        "success": True,
+        "message": "Dataset imported",
+        "dataset": {
+            "name": payload["name"],
+            "task_type": payload["task_type"],
+            "evaluation_metric": payload["evaluation_metric"],
+            "size": len(payload["reference_data"].get("source_texts", [])),
+        },
     })
 
 
