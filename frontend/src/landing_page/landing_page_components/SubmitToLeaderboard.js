@@ -523,12 +523,15 @@ const SubmitToLeaderboard = ({
   // };
 
   return (
-    <div className="w-full bg-gradient-to-b from-gray-950 via-gray-900 to-gray-900 text-white min-h-screen flex justify-center px-4">
-      <div className="w-full max-w-4xl mx-auto mt-12 mb-20 rounded-2xl bg-gray-900/70 border border-gray-800 shadow-xl p-6 md:p-10 space-y-6">
+    <div className="w-full bg-black text-white min-h-screen flex justify-center px-4">
+      <div className="w-full max-w-4xl mx-auto mt-12 mb-20 rounded-lg bg-gray-950 border border-gray-800 p-6 md:p-10 space-y-6">
         {/* Header + Close */}
         <div className="flex flex-row items-center justify-between">
           <div>
-            <div className="font-extrabold text-2xl md:text-3xl bg-clip-text text-transparent bg-gradient-to-r from-yellow-400 via-turquoise-400 to-blue-400">
+            <div className="text-xs uppercase tracking-[0.2em] text-[#EDDC8F] mb-3">
+              Model Submission
+            </div>
+            <div className="font-extrabold text-2xl md:text-3xl bg-clip-text text-transparent bg-gradient-to-r from-[#EDDC8F] to-[#F1CA57]">
               Submit to the Leaderboard
             </div>
             <p className="text-sm text-gray-300/90 mt-1">Share your model’s results and we’ll evaluate and publish the ranking.</p>
@@ -704,21 +707,21 @@ const SubmitToLeaderboard = ({
           Download Example CSV
         </a> */}
         {/* Submit to Leaderboard (API-connected UI) */}
-        <div className="w-full max-w-3xl mx-auto bg-gray-800/70 border border-gray-700 rounded-xl p-4 md:p-6 mb-8 relative">
+        <div className="w-full max-w-3xl mx-auto bg-black/40 border border-gray-800 rounded-lg p-4 md:p-6 mb-8 relative">
           <button
             aria-label="Close"
-            className="absolute right-3 top-3 px-2 py-1 rounded-md border border-gray-700 text-gray-300 hover:bg-gray-700/40"
+            className="absolute right-3 top-3 px-2 py-1 rounded-md border border-gray-700 text-gray-300 hover:border-[#EDDC8F]/60 hover:text-[#EDDC8F]"
             onClick={() => navigate('/')}
           >
             ×
           </button>
-          <div className="text-lg font-semibold text-white mb-3">Submit to Model Leaderboard</div>
+          <div className="text-lg font-semibold text-[#EDDC8F] mb-3">Submit to Model Leaderboard</div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
             <div className="md:col-span-2">
               <label className="block text-sm text-gray-300 mb-1">Benchmark</label>
               <select
-                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70"
                 value={datasetKey}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -741,7 +744,7 @@ const SubmitToLeaderboard = ({
                 max={5}
                 value={count}
                 onChange={(e) => setCount(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70"
               />
             </div>
           </div>
@@ -751,13 +754,13 @@ const SubmitToLeaderboard = ({
             </button>
             {proposeOpen && (
               <form onSubmit={proposeDataset} className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input placeholder="Dataset name" value={proposeForm.name} onChange={e=>setProposeForm(f=>({...f,name:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white" required />
-                <input placeholder="Task type (e.g., translation)" value={proposeForm.task_type} onChange={e=>setProposeForm(f=>({...f,task_type:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white" required />
-                <input placeholder="Evaluation metric (e.g., bleu)" value={proposeForm.evaluation_metric} onChange={e=>setProposeForm(f=>({...f,evaluation_metric:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white" required />
-                <input placeholder="URL (optional)" value={proposeForm.url} onChange={e=>setProposeForm(f=>({...f,url:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white" />
-                <input placeholder="Description (optional)" value={proposeForm.description} onChange={e=>setProposeForm(f=>({...f,description:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white" />
+                <input placeholder="Dataset name" value={proposeForm.name} onChange={e=>setProposeForm(f=>({...f,name:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70" required />
+                <input placeholder="Task type (e.g., translation)" value={proposeForm.task_type} onChange={e=>setProposeForm(f=>({...f,task_type:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70" required />
+                <input placeholder="Evaluation metric (e.g., bleu)" value={proposeForm.evaluation_metric} onChange={e=>setProposeForm(f=>({...f,evaluation_metric:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70" required />
+                <input placeholder="URL (optional)" value={proposeForm.url} onChange={e=>setProposeForm(f=>({...f,url:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70" />
+                <input placeholder="Description (optional)" value={proposeForm.description} onChange={e=>setProposeForm(f=>({...f,description:e.target.value}))} className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70" />
                 <div className="md:col-span-2">
-                  <button type="submit" disabled={proposeSubmitting} className="px-3 py-2 rounded-md border border-yellow-500/60 text-yellow-300 hover:bg-yellow-500/10 disabled:opacity-50">
+                  <button type="submit" disabled={proposeSubmitting} className="px-3 py-2 rounded-md border border-[#EDDC8F]/60 text-[#EDDC8F] hover:bg-[#EDDC8F]/10 disabled:opacity-50">
                     {proposeSubmitting ? 'Submitting...' : 'Propose Dataset'}
                   </button>
                 </div>
@@ -770,7 +773,7 @@ const SubmitToLeaderboard = ({
               type="button"
               onClick={fetchSentences}
               disabled={loadingFetch}
-              className="px-4 py-2 rounded-md border border-blue-500/60 text-blue-300 hover:bg-blue-500/10 disabled:opacity-50"
+              className="px-4 py-2 rounded-md border border-[#EDDC8F] bg-[#EDDC8F] text-black font-semibold hover:bg-[#F1CA57] disabled:opacity-50"
             >
               {loadingFetch ? "Fetching…" : "Get Test Sentences"}
             </button>
@@ -790,7 +793,7 @@ const SubmitToLeaderboard = ({
                 link.click();
                 URL.revokeObjectURL(link.href);
               }}
-              className="px-4 py-2 rounded-md border border-yellow-500/60 text-yellow-300 hover:bg-yellow-500/10"
+              className="px-4 py-2 rounded-md border border-[#EDDC8F]/60 text-[#EDDC8F] hover:bg-[#EDDC8F]/10"
             >
               Download CSV Template
             </button>
@@ -838,11 +841,11 @@ const SubmitToLeaderboard = ({
           {!useCsv && sourceSentences.length > 0 && (
             <div className="space-y-3 mb-4">
               {sourceSentences.map((src, idx) => (
-                <div key={idx} className="bg-gray-900 border border-gray-700 rounded-lg p-3">
+                <div key={idx} className="bg-gray-900 border border-gray-800 rounded-lg p-3">
                   <div className="text-sm text-gray-300 mb-1">Source #{sentenceIds[idx]}</div>
                   <div className="text-white mb-2">{src}</div>
                   <textarea
-                    className="w-full min-h-[60px] px-3 py-2 rounded-md bg-gray-800 border border-gray-700 text-white"
+                    className="w-full min-h-[60px] px-3 py-2 rounded-md bg-black border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70"
                     placeholder="Enter your translation here"
                     value={translations[idx] || ""}
                     onChange={(e) => {
@@ -864,7 +867,7 @@ const SubmitToLeaderboard = ({
                 placeholder="e.g. my-model-v1"
                 value={modelNameInput}
                 onChange={(e) => setModelNameInput(e.target.value)}
-                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#EDDC8F]/70"
               />
             </div>
             <div className="flex gap-3 md:justify-end">
@@ -872,7 +875,7 @@ const SubmitToLeaderboard = ({
                 type="button"
                 onClick={submitToLeaderboard}
                 disabled={loadingSubmit || !sentenceIds.length}
-                className="px-4 py-2 rounded-md border border-green-500/60 text-green-300 hover:bg-green-500/10 disabled:opacity-50"
+                className="px-4 py-2 rounded-md border border-[#EDDC8F] bg-[#EDDC8F] text-black font-semibold hover:bg-[#F1CA57] disabled:opacity-50"
               >
                 {loadingSubmit ? "Submitting…" : "Submit to Leaderboard"}
               </button>
@@ -880,7 +883,7 @@ const SubmitToLeaderboard = ({
           </div>
 
           {submitResult && (
-            <div className="mt-4 text-sm text-white">
+            <div className="mt-4 text-sm text-[#EDDC8F]">
               Success! Score: <span className="font-semibold">{submitResult.score?.toFixed(3)}</span>
             </div>
           )}

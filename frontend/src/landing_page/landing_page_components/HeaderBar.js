@@ -1,30 +1,60 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from '../../constants/RouteConstants';
 
 export default function HeaderBar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const isHome = location.pathname === '/' || location.pathname === '';
+  const navItems = [
+    { label: 'Leaderboard', path: '/' },
+    { label: 'Evaluations', path: evaluationsPath },
+    { label: 'Submit', path: submittoleaderboardPath },
+    { label: 'Add Dataset', path: addDatasetPath },
+    { label: 'Benchmarks', path: csvBenchmarksPath },
+  ];
+
+  const isActive = (path) => {
+    if (path === '/') return location.pathname === '/' || location.pathname === '';
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+  };
 
   return (
-    <div className="sticky top-0 z-50 bg-gray-800">
-      <div className="max-w-7xl mx-auto px-4 h-12 flex items-center justify-between">
-        <a href="https://anote.ai" className="flex items-center gap-2" target="_blank" rel="noreferrer">
+    <div className="sticky top-0 z-50 border-b border-[#EDDC8F]/20 bg-black/95 backdrop-blur">
+      <div className="max-w-7xl mx-auto px-4 min-h-14 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3">
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2 text-left"
+          aria-label="Go to leaderboard home"
+        >
           <img src="/logo.png" alt="Anote" className="h-7 w-7" />
-          <span className="font-semibold text-white">Anote</span>
-        </a>
-        {!isHome && (
+          <span className="font-semibold text-white">Anote Leaderboard</span>
+        </button>
+        <nav className="flex flex-wrap items-center gap-2">
+          {navItems.map((item) => (
+            <button
+              key={item.path}
+              type="button"
+              onClick={() => navigate(item.path)}
+              className={[
+                "px-3 py-1.5 rounded-md text-sm border transition-colors",
+                isActive(item.path)
+                  ? "border-[#EDDC8F] bg-[#EDDC8F] text-black"
+                  : "border-gray-800 text-gray-300 hover:border-[#EDDC8F]/60 hover:text-[#EDDC8F]"
+              ].join(' ')}
+            >
+              {item.label}
+            </button>
+          ))}
           <button
-            aria-label="Close"
-            title="Back to Home"
-            onClick={() => navigate('/')}
-            className="h-8 w-8 flex items-center justify-center rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100"
+            type="button"
+            onClick={() => window.open('https://anote.ai', '_blank', 'noopener,noreferrer')}
+            className="px-3 py-1.5 rounded-md text-sm border border-gray-800 text-gray-400 hover:border-gray-600 hover:text-white transition-colors"
           >
-            ×
+            Anote.ai
           </button>
-        )}
+        </nav>
       </div>
     </div>
   );
 }
-
