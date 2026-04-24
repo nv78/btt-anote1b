@@ -1161,14 +1161,14 @@ const Leaderboard = () => {
 
             {/* Rankings table */}
             <div className="flex-1">
-              {/* Table header */}
-              <div className="grid grid-cols-[3rem_1fr_6rem] text-xs font-semibold uppercase tracking-wider text-gray-500 px-5 py-2.5 bg-[#111827]">
+              {/* Table header — same bg as card, separated by a border only */}
+              <div className="grid grid-cols-[3rem_1fr_6rem] text-[11px] font-semibold uppercase tracking-widest text-gray-500 px-5 py-2.5 border-b border-gray-700/50">
                 <div>Rank</div>
                 <div>Model</div>
                 <div className="text-right">Score</div>
               </div>
 
-              <div className="divide-y divide-gray-800/60">
+              <div className="divide-y divide-gray-700/25">
                 {dataset.models.map((model, modelIndex) => {
                   const isTop = model.rank === 1;
                   const score = typeof model.score === 'number'
@@ -1180,13 +1180,19 @@ const Leaderboard = () => {
                       className={[
                         "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-3 text-sm transition-colors",
                         isTop
-                          ? "bg-[#defe47]/[0.06] hover:bg-[#defe47]/10"
-                          : "hover:bg-white/[0.03]"
+                          ? "bg-[#defe47]/[0.06] hover:bg-[#defe47]/[0.1]"
+                          : modelIndex % 2 === 1
+                            ? "bg-white/[0.018] hover:bg-white/[0.045]"
+                            : "hover:bg-white/[0.045]"
                       ].join(' ')}
                     >
-                      <div className="font-semibold text-gray-300 flex items-center gap-0.5">
+                      <div className="font-semibold text-gray-300 flex items-center gap-1">
                         {rankBadge(model.rank)}
-                        {model.rank > 3 && <span className="text-gray-500">{model.rank}</span>}
+                        {model.rank > 3 && (
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-700/50 text-[11px] text-gray-400 tabular-nums font-mono">
+                            {model.rank}
+                          </span>
+                        )}
                       </div>
                       <div
                         className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')}
@@ -1195,7 +1201,10 @@ const Leaderboard = () => {
                         {model.model}
                       </div>
                       <div className="text-right">
-                        <span className={["tabular-nums font-semibold", isTop ? "text-[#defe47]" : "text-gray-200"].join(' ')}>
+                        <span className={[
+                          "tabular-nums font-semibold",
+                          isTop ? "text-[#defe47]" : model.rank === 2 ? "text-gray-100" : "text-gray-300"
+                        ].join(' ')}>
                           {score}
                         </span>
                         {model.ci && (
