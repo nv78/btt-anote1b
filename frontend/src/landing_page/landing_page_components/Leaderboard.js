@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { submittoleaderboardPath, csvBenchmarksPath } from "../../constants/RouteConstants";
+import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 import { useNavigate } from "react-router-dom";
 
 const Leaderboard = () => {
@@ -1026,125 +1026,226 @@ const Leaderboard = () => {
   }
   ];
   const navigate = useNavigate();
+
+  const displayDatasets = viewMode === 'curated'
+    ? (curatedDatasets.length ? curatedDatasets : datasets)
+    : (liveDatasets.length ? liveDatasets : datasets);
+
+  const rankBadge = (rank) => {
+    if (rank === 1) return <span title="1st place" className="mr-1">🥇</span>;
+    if (rank === 2) return <span title="2nd place" className="mr-1">🥈</span>;
+    if (rank === 3) return <span title="3rd place" className="mr-1">🥉</span>;
+    return null;
+  };
+
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-gray-900 pb-24 mx-3">
-      <header className="w-full max-w-7xl mt-10 pt-10 text-center">
-        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white">
+    <div className="flex flex-col items-center justify-start min-h-screen bg-[#111827] pb-24 px-4 text-gray-100">
+
+      {/* ── Hero ── */}
+      <header className="w-full max-w-4xl mt-8 pt-4 text-center">
+        <div className="text-xs uppercase tracking-[0.2em] text-[#28b2fb] mb-3 font-medium">
+          Anote Evaluations
+        </div>
+        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">
           Model Leaderboard
         </h1>
-        <p className="mt-3 text-gray-300/90 text-sm md:text-base">
-          Compare models across a variety of datasets
+        <p className="mt-4 text-gray-400 text-sm md:text-base max-w-xl mx-auto leading-relaxed">
+          Compare, submit, and create benchmark datasets.
         </p>
+
+        {/* Stat pills */}
+        {/* <div className="flex flex-wrap justify-center gap-3 mt-5">
+          {[
+            { label: 'Datasets', value: displayDatasets.length },
+            { label: 'Task types', value: '4+' },
+            { label: 'Open source', value: '✓' },
+          ].map(({ label, value }) => (
+            <span key={label} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.05] border border-white/[0.08] text-xs text-gray-300">
+              <span className="font-semibold text-white">{value}</span>
+              {label}
+            </span>
+          ))}
+        </div> */}
       </header>
-      <div className="flex gap-3 mt-4">
+
+      {/* ── CTA buttons ── */}
+      {/* <div className="flex flex-wrap justify-center gap-2 mt-7">
         <button
-          className="px-6 py-2 rounded-md text-lg font-semibold transition-colors border border-blue-500/60 text-blue-300 hover:bg-blue-500/10"
+          className="px-5 py-2 rounded-md text-sm font-semibold transition-all bg-[#defe47] text-black hover:bg-[#f0ff6e] active:scale-95"
+          onClick={() => navigate(evaluationsPath)}
+        >
+          View Evaluations
+        </button>
+        <button
+          className="px-5 py-2 rounded-md text-sm font-semibold transition-all border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 active:scale-95"
+          onClick={() => navigate(submittoleaderboardPath)}
+        >
+          Submit Model
+        </button>
+        <div className="hidden sm:block w-px bg-gray-700 mx-1 self-stretch" />
+        <button
+          className="px-5 py-2 rounded-md text-sm font-medium transition-all border border-gray-700 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
+          onClick={() => navigate(addDatasetPath)}
+        >
+          Add Dataset
+        </button>
+        <button
+          className="px-5 py-2 rounded-md text-sm font-medium transition-all border border-gray-700 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
           onClick={() => navigate(csvBenchmarksPath)}
         >
           Run Benchmarks
         </button>
         <button
-          className="px-6 py-2 rounded-md text-lg font-semibold transition-colors border border-gray-600 text-gray-300 hover:bg-gray-700/40"
+          className="px-5 py-2 rounded-md text-sm font-medium transition-all border border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-300 active:scale-95"
           onClick={() => navigate('/leaderboard/admin')}
         >
-          Manage Leaderboard
+          Manage
         </button>
-        {/* <div className="ml-4 inline-flex border border-gray-700 rounded-md overflow-hidden">
-          <button onClick={()=>setViewMode('live')} className={`px-3 py-1 text-sm ${viewMode==='live'?'bg-gray-700 text-white':'text-gray-300'}`}>Live</button>
-          <button onClick={()=>setViewMode('curated')} className={`px-3 py-1 text-sm ${viewMode==='curated'?'bg-gray-700 text-white':'text-gray-300'}`}>Curated</button>
-        </div> */}
-      </div>
+      </div> */}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 mt-8 w-full max-w-7xl">
-        {(viewMode==='curated' ? (curatedDatasets.length ? curatedDatasets : datasets) : (liveDatasets.length ? liveDatasets : datasets)).map((dataset, index) => (
+      {/* ── Loading / error ── */}
+      {loading && (
+        <div className="mt-16 text-gray-400 flex items-center gap-2 text-sm">
+          <svg className="animate-spin w-4 h-4 text-[#28b2fb]" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+          </svg>
+          Loading leaderboard…
+        </div>
+      )}
+      {error && (
+        <div className="mt-10 text-red-400 text-sm bg-red-900/20 border border-red-800/40 rounded-lg px-4 py-2">
+          {error}
+        </div>
+      )}
+
+      {/* ── Dataset cards ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6 mt-8 w-full max-w-7xl">
+        {displayDatasets.map((dataset, index) => (
           <div
             key={index}
-            className="w-full p-5 md:p-6 bg-gray-900/70 rounded-xl shadow-lg border border-gray-800 hover:border-gray-700 transition-colors"
+            className="flex flex-col w-full bg-[#0d1117] rounded-xl border border-gray-800 hover:border-[#defe47]/40 transition-colors shadow-lg overflow-hidden"
           >
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-              <h2 className="text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r  from-turquoise-400 to-blue-400">
-                {dataset.name}
-              </h2>
-              {dataset.url ? (
-                <a
-                  href={dataset.url}
-                  className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-700 text-[#defe47] hover:bg-blue-500/10 transition-colors"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Open dataset ${dataset.name}`}
+            {/* Card header */}
+            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/70">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>
+                  {dataset.name}
+                </h2>
+                {dataset.evaluation_metric && (
+                  <span className="mt-1 inline-block text-xs text-gray-500 font-medium">
+                    {dataset.evaluation_metric}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {dataset.url && (
+                  <a
+                    href={dataset.url}
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#defe47] hover:border-[#defe47]/40 transition-colors"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open dataset ${dataset.name}`}
+                  >
+                    Dataset ↗
+                  </a>
+                )}
+                <button
+                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#28b2fb] hover:border-[#28b2fb]/40 transition-colors"
+                  onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
                 >
-                  View Dataset
-                  <span aria-hidden>↗</span>
-                </a>
-              ) : (
-                <span className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-700 text-gray-300">
-                  Metric: {dataset.evaluation_metric || '—'}
-                </span>
-              )}
-              <button
-                className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-full border border-blue-500/60 text-blue-300 hover:bg-blue-500/10 transition-colors"
-                onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
-              >
-                Details
-              </button>
+                  Details
+                </button>
+              </div>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-gray-800">
-              <div className="grid grid-cols-3 text-white font-semibold text-center bg-gray-900/80 px-4 py-3">
+            {/* Rankings table */}
+            <div className="flex-1">
+              {/* Table header */}
+              <div className="grid grid-cols-[3rem_1fr_6rem] text-xs font-semibold uppercase tracking-wider text-gray-500 px-5 py-2.5 bg-[#111827]">
                 <div>Rank</div>
                 <div>Model</div>
-                <div>Score</div>
-                {/* <div>Last Updated</div> */}
+                <div className="text-right">Score</div>
               </div>
-              <div className="divide-y divide-gray-800">
-                {dataset.models
-                  .map((model, modelIndex) => {
-                    const isTop = model.rank === 1;
-                    const rowBase = "grid grid-cols-3 text-center px-4 py-3 text-white hover:bg-gray-700/50 transition-colors";
-                    const topBg = isTop ? " bg-gradient-to-r from-turquoise-400/15 to-transparent" : "";
-                    const score = typeof model.score === 'number' ? model.score.toFixed(model.score < 1 ? 3 : 2) : model.score;
-                    return (
-                      <div key={modelIndex} className={rowBase + topBg}>
-                        <div className="font-semibold">
-                          {isTop ? <span title="Top model" className="mr-1">🥇</span> : null}
-                          {model.rank}
-                        </div>
-                        <div className="truncate" title={model.model}>{model.model}</div>
-                        <div className="tabular-nums">{score}{model.ci ? <span className="ml-2 text-xs text-gray-300">({model.ci})</span> : null}</div>
-                        {/* <div className="text-gray-300">{model.updated}</div> */}
+
+              <div className="divide-y divide-gray-800/60">
+                {dataset.models.map((model, modelIndex) => {
+                  const isTop = model.rank === 1;
+                  const score = typeof model.score === 'number'
+                    ? model.score.toFixed(model.score < 1 ? 3 : 2)
+                    : model.score;
+                  return (
+                    <div
+                      key={modelIndex}
+                      className={[
+                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-3 text-sm transition-colors",
+                        isTop
+                          ? "bg-[#defe47]/[0.06] hover:bg-[#defe47]/10"
+                          : "hover:bg-white/[0.03]"
+                      ].join(' ')}
+                    >
+                      <div className="font-semibold text-gray-300 flex items-center gap-0.5">
+                        {rankBadge(model.rank)}
+                        {model.rank > 3 && <span className="text-gray-500">{model.rank}</span>}
                       </div>
-                    );
-                  })}
+                      <div
+                        className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')}
+                        title={model.model}
+                      >
+                        {model.model}
+                      </div>
+                      <div className="text-right">
+                        <span className={["tabular-nums font-semibold", isTop ? "text-[#defe47]" : "text-gray-200"].join(' ')}>
+                          {score}
+                        </span>
+                        {model.ci && (
+                          <div className="text-[10px] text-gray-500 leading-none mt-0.5">{model.ci}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* FAQs Section */}
-      <div className="w-full max-w-5xl mx-auto mt-20 px-2">
-        <div className="bg-gray-900/70 rounded-xl p-6 md:p-10 border border-gray-800">
-          <div className="text-yellow-400 text-2xl md:text-3xl font-semibold mb-6 md:mb-8">FAQs</div>
+      {/* ── FAQs ── */}
+      <div className="w-full max-w-3xl mx-auto mt-20 px-2">
+        <div className="mb-6 text-center">
+          <span className="text-xs uppercase tracking-[0.2em] text-[#28b2fb] font-medium">Help</span>
+          <h2 className="text-2xl md:text-3xl font-bold text-white mt-1">Frequently Asked Questions</h2>
+        </div>
+        <div className="space-y-2">
           {faqs.map((faq, index) => (
             <div
-              className="bg-gray-800/80 px-5 py-4 my-4 rounded-xl cursor-pointer border border-gray-700 hover:border-gray-600 transition-colors"
-              onClick={() => handleClick(index)}
               key={index}
+              className="bg-[#0d1117] rounded-xl border border-gray-800 hover:border-gray-700 transition-colors overflow-hidden"
             >
-              <div className="faq-header">
-                <h2 className="text-lg md:text-xl font-semibold bg-clip-text text-transparent bg-gradient-to-r from-turquoise-400 to-blue-400">
+              <button
+                className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left cursor-pointer"
+                onClick={() => handleClick(index)}
+              >
+                <span className="text-sm md:text-base font-semibold text-white">
                   {faq.question}
-                </h2>
-              </div>
+                </span>
+                <span className={["text-gray-400 transition-transform duration-200 shrink-0", openIndex === index ? "rotate-180" : ""].join(' ')}>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </span>
+              </button>
               {openIndex === index && (
-                <div className="faq-answer mt-2 text-gray-200">
-                  <p className="leading-relaxed">{faq.answer}</p>
+                <div className="px-5 pb-5 text-sm text-gray-400 leading-relaxed border-t border-gray-800/60 pt-3">
+                  {faq.answer}
                 </div>
               )}
             </div>
           ))}
         </div>
       </div>
+
     </div>
   );
 };

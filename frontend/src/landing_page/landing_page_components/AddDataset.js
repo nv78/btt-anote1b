@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LeaderboardSDK from "../../lib/leaderboardSdk";
-import { evaluationsPath } from "../../constants/RouteConstants";
+import { csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 
 const emptyForm = {
   source: "manual",
@@ -97,17 +97,43 @@ const AddDataset = () => {
   };
 
   return (
-    <section className="bg-black min-h-screen py-10 px-4 text-gray-100">
+    <section className="bg-[#111827] min-h-screen py-10 px-4 text-gray-100">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-[#EDDC8F]">Add Dataset</h1>
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
+          <div>
+            <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Dataset Registry</div>
+            <h1 className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">Add Dataset</h1>
+          </div>
+          <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-[#defe47] bg-[#defe47] text-black font-semibold hover:bg-[#28b2fb]"
+            onClick={() => navigate(evaluationsPath)}
+          >
+            View Evaluations
+          </button>
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10"
+            onClick={() => navigate(submittoleaderboardPath)}
+          >
+            Submit Model
+          </button>
           <button
             type="button"
             className="px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:bg-gray-900"
-            onClick={() => navigate(evaluationsPath)}
+            onClick={() => navigate(csvBenchmarksPath)}
           >
-            View Leaderboard
+            Run Benchmarks
           </button>
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:bg-gray-900"
+            onClick={() => navigate("/")}
+          >
+            Leaderboard
+          </button>
+          </div>
         </div>
 
         <form onSubmit={submit} className="border border-gray-800 rounded-lg bg-gray-950 p-5 space-y-4">
@@ -292,7 +318,7 @@ const AddDataset = () => {
           <button
             type="submit"
             disabled={submitting}
-            className="px-5 py-2 rounded-md border border-[#EDDC8F] text-[#EDDC8F] hover:bg-[#EDDC8F] hover:text-black disabled:opacity-50"
+            className="px-5 py-2 rounded-md border border-[#defe47] text-[#defe47] hover:bg-[#defe47] hover:text-black disabled:opacity-50"
           >
             {submitting ? "Saving..." : "Save Dataset"}
           </button>

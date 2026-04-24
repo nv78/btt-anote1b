@@ -3,6 +3,10 @@
 @tailwind utilities;
 @import 'flowbite/dist/flowbite.css';
 
+html, body, #root {
+  background-color: #111827;
+  color: #f3f4f6;
+}
 
 h1{
     @apply text-4xl font-semibold my-5;

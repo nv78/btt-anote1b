@@ -316,17 +316,19 @@ export default function CsvBenchmarksDemo() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-10 text-white bg-[#111827] rounded-xl shadow-lg">
-      <h1 className="text-3xl font-bold mb-2 text-[#DEFE47]">CSV Benchmarks Demo</h1>
-      <p className="text-sm text-gray-300 mb-6">
+    <div className="min-h-screen bg-[#111827] px-4 py-10 text-gray-100">
+    <div className="max-w-6xl mx-auto">
+      <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Benchmark Runner</div>
+      <h1 className="text-3xl sm:text-4xl font-extrabold mb-2 bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">CSV Benchmarks</h1>
+      <p className="text-sm text-gray-300 mb-6 max-w-2xl">
         Select datasets from the bundled benchmark CSVs and run zero-shot models.
         Use Echo mode to dry-run without API keys.
       </p>
 
-      {error && <div className="p-3 mb-4 border border-red-400 bg-red-100 text-red-800 rounded">{String(error)}</div>}
-      {loading && <div className="mb-3 text-sm text-[#28B2FB]">Running… This may take a minute for real models.</div>}
+      {error && <div className="p-3 mb-4 border border-red-500/50 bg-red-950 text-red-200 rounded-md">{String(error)}</div>}
+      {loading && <div className="mb-3 text-sm text-[#defe47]">Running... This may take a minute for real models.</div>}
 
-      <div className="mb-6 flex items-center gap-3 flex-wrap">
+      <div className="mb-6 flex items-center gap-3 flex-wrap border border-gray-800 bg-gray-950 rounded-lg p-4">
         <label className="text-sm font-medium">Sample size per dataset:</label>
         <input
           type="number"
@@ -334,7 +336,7 @@ export default function CsvBenchmarksDemo() {
           min={1}
           max={200}
           onChange={e => setSampleSize(e.target.value)}
-          className="border border-gray-600 bg-[#1F2937] px-2 py-1 w-24 rounded text-white"
+          className="border border-gray-700 bg-gray-900 px-2 py-1 w-24 rounded-md text-white focus:outline-none focus:border-[#defe47]/70"
         />
         <label className="ml-4 text-sm flex items-center gap-2">
           <input type="checkbox" checked={echoMode} onChange={e => setEchoMode(e.target.checked)} />
@@ -343,21 +345,21 @@ export default function CsvBenchmarksDemo() {
         <button
           onClick={runBench}
           disabled={loading || selectedList.length === 0}
-          className="ml-3 px-4 py-2 bg-[#28B2FB] hover:bg-blue-500 text-black font-semibold rounded disabled:opacity-40"
+          className="ml-3 px-4 py-2 bg-[#defe47] hover:bg-[#28b2fb] text-black font-semibold rounded-md disabled:opacity-40"
         >
           Run Benchmarks
         </button>
         <button
           onClick={selectAll}
           disabled={loading || filteredDatasets.length === 0}
-          className="px-4 py-2 border border-gray-600 bg-[#1F2937] rounded hover:bg-gray-700"
+          className="px-4 py-2 border border-[#defe47]/60 text-[#defe47] rounded-md hover:bg-[#defe47]/10 disabled:opacity-40"
         >
           Select All
         </button>
         <button
           onClick={clearSelection}
           disabled={loading || selectedList.length === 0}
-          className="px-4 py-2 border border-gray-600 bg-[#1F2937] rounded hover:bg-gray-700"
+          className="px-4 py-2 border border-gray-700 text-gray-300 rounded-md hover:bg-gray-900 disabled:opacity-40"
         >
           Clear
         </button>
@@ -371,13 +373,13 @@ export default function CsvBenchmarksDemo() {
           value={filter}
           onChange={e => setFilter(e.target.value)}
           placeholder="Filter datasets…"
-          className="border border-gray-600 bg-[#1F2937] px-2 py-1 text-sm rounded text-white w-56"
+          className="border border-gray-700 bg-gray-900 px-2 py-1 text-sm rounded-md text-white w-56 focus:outline-none focus:border-[#defe47]/70"
         />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
         {filteredDatasets.map(ds => (
-          <label key={ds.filename} className="border border-gray-600 rounded-lg p-3 flex items-center gap-3 bg-[#1F2937] hover:bg-gray-700 cursor-pointer">
+          <label key={ds.filename} className="border border-gray-800 rounded-lg p-3 flex items-center gap-3 bg-gray-950 hover:border-[#defe47]/50 cursor-pointer transition-colors">
             <input
               type="checkbox"
               checked={!!selected[ds.filename]}
@@ -391,13 +393,13 @@ export default function CsvBenchmarksDemo() {
 
       {!echoMode && modelCatalog.length > 0 && (
         <div className="mb-8">
-          <h2 className="font-semibold text-[#DEFE47] mb-2">Models</h2>
+          <h2 className="font-semibold text-[#defe47] mb-2">Models</h2>
           <p className="text-xs text-gray-400 mb-3">
             Select specific models to run. If none selected, backend defaults are used.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {modelCatalog.map(m => (
-              <label key={m.name} className="border border-gray-600 rounded-lg p-3 flex items-center gap-3 bg-[#1F2937] hover:bg-gray-700 cursor-pointer">
+              <label key={m.name} className="border border-gray-800 rounded-lg p-3 flex items-center gap-3 bg-gray-950 hover:border-[#defe47]/50 cursor-pointer transition-colors">
                 <input
                   type="checkbox"
                   checked={!!modelSelected[m.name]}
@@ -412,42 +414,42 @@ export default function CsvBenchmarksDemo() {
       )}
 
       {results?.runs && results.runs.length > 0 && (
-        <div className="overflow-x-auto border border-gray-600 rounded-lg bg-[#1F2937] p-4">
+        <div className="overflow-x-auto border border-gray-800 rounded-lg bg-gray-950 p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm text-gray-300">
               Runs: {results.runs.length} • Models: {modelNames.length}
             </div>
-            <button onClick={() => setShowRaw(v => !v)} className="text-sm underline text-[#28B2FB]">
+            <button onClick={() => setShowRaw(v => !v)} className="text-sm underline text-[#defe47]">
               {showRaw ? 'Hide' : 'Show'} sample response
             </button>
           </div>
           {showRaw && (
-            <pre className="border border-gray-700 rounded bg-black text-[#28B2FB] p-3 text-xs mb-3 overflow-auto max-h-64">
+            <pre className="border border-gray-800 rounded-md bg-[#111827] text-[#defe47] p-3 text-xs mb-3 overflow-auto max-h-64">
               {rawJson}
             </pre>
           )}
-          <table className="min-w-full border border-gray-600 text-sm">
-            <thead className="bg-[#111827] text-[#DEFE47]">
+          <table className="min-w-full border border-gray-800 text-sm">
+            <thead className="bg-[#111827] text-[#defe47]">
               <tr>
-                <th className="border border-gray-600 px-2 py-2 text-left">Dataset</th>
-                <th className="border border-gray-600 px-2 py-2 text-left">Task</th>
-                <th className="border border-gray-600 px-2 py-2 text-left">Count</th>
+                <th className="border border-gray-800 px-2 py-2 text-left">Dataset</th>
+                <th className="border border-gray-800 px-2 py-2 text-left">Task</th>
+                <th className="border border-gray-800 px-2 py-2 text-left">Count</th>
                 {modelNames.map(m => (
-                  <th className="border border-gray-600 px-2 py-2 text-left" key={m}>{m}</th>
+                  <th className="border border-gray-800 px-2 py-2 text-left" key={m}>{m}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {results.runs.map((r) => (
-                <tr key={r.dataset} className="hover:bg-gray-800">
-                  <td className="border border-gray-700 px-2 py-1">{r.dataset}</td>
-                  <td className="border border-gray-700 px-2 py-1">{r.task_type}</td>
-                  <td className="border border-gray-700 px-2 py-1">{r.count}</td>
+                <tr key={r.dataset} className="hover:bg-gray-900">
+                  <td className="border border-gray-800 px-2 py-1">{r.dataset}</td>
+                  <td className="border border-gray-800 px-2 py-1">{r.task_type}</td>
+                  <td className="border border-gray-800 px-2 py-1">{r.count}</td>
                   {modelNames.map((m) => {
                     const res = r.results?.[m];
-                    if (!res) return <td className="border border-gray-700 px-2 py-1" key={m}>—</td>;
+                    if (!res) return <td className="border border-gray-800 px-2 py-1" key={m}>—</td>;
                     const display = formatMetricCell(res);
-                    return <td className="border border-gray-700 px-2 py-1" key={m}>{display}</td>;
+                    return <td className="border border-gray-800 px-2 py-1" key={m}>{display}</td>;
                   })}
                 </tr>
               ))}
@@ -456,6 +458,6 @@ export default function CsvBenchmarksDemo() {
         </div>
       )}
     </div>
+    </div>
   );
 }
-
