@@ -143,8 +143,15 @@ LEADERBOARD_API_BASE=http://localhost:5001 python backend/examples/seed_demo.py
 | `DB_PASSWORD` | — | MySQL password |
 | `DB_NAME` | `agents` | MySQL database |
 | `DB_PORT` | `3306` | MySQL port |
-| `ALLOWED_ORIGINS` | `*` | CORS allowed origins |
+| `ALLOWED_ORIGINS` | local React origins in development | CORS allowed origins. Required outside development. |
 | `LEADERBOARD_API_BASE` | `http://localhost:5001` | Used by seed/test scripts |
+| `LEADERBOARD_API_KEYS` | — | Comma-separated API keys. When set, write endpoints require `X-API-Key`. |
+| `REQUIRE_API_KEY` | — | Set to `true` to enforce API-key auth. |
+| `SUBMIT_MODEL_RATE_LIMIT` | `10/minute` | Per-IP write limit for submissions. |
+| `ADD_DATASET_RATE_LIMIT` | `5/minute` | Per-IP write limit for dataset creation. |
+| `IMPORT_DATASET_RATE_LIMIT` | `5/minute` | Per-IP write limit for imports. |
+| `RUN_CSV_RATE_LIMIT` | `5/minute` | Per-IP write limit for CSV benchmark runs. |
+| `TRUSTED_REMOTE_CODE_MODELS` | — | Explicit allowlist for Hugging Face model ids that may use remote code. |
 
 **No API keys are required to run the platform.** API keys are only needed if you want to evaluate GPT-4, Claude, Gemini, etc.
 

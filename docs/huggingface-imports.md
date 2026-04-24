@@ -34,6 +34,20 @@ curl -X POST http://localhost:5001/public/import_hf_dataset \
   }'
 ```
 
+The ingestion-compatible alias is also available:
+
+```bash
+curl -X POST http://localhost:5001/api/datasets/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "huggingface",
+    "dataset_id": "ag_news",
+    "split": "test",
+    "max_samples": 100,
+    "task_type": "text_classification"
+  }'
+```
+
 When MySQL is configured, imported datasets are written to `benchmark_datasets`. Without MySQL, they live in the Flask in-memory store until the process restarts.
 
 ## Supported Conversion Defaults
@@ -41,3 +55,5 @@ When MySQL is configured, imported datasets are written to `benchmark_datasets`.
 - `text_classification`: stores `source_texts` and `labels`; default metric is `accuracy`.
 - `document_qa` and `line_qa`: stores `source_texts` and `answers`; default metric is `exact`.
 - `translation`: stores `source_texts` and `answers`; default metric is `bleu`.
+
+For Hugging Face datasets that expose class names in feature metadata, numeric labels are converted to readable labels during import.

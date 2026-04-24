@@ -85,6 +85,19 @@ Notes
   - `echo`: returns a dummy output (useful for dry-runs).
   - `py`: calls a Python function from `backend/models.py` (see below).
 
+#### Additional Public API Utilities
+
+- `GET /api/metrics`: list metric metadata.
+- `GET /api/metrics/task/<task_type>`: list recommended metrics for a task type.
+- `POST /public/import_hf_dataset`: import a bounded Hugging Face split.
+- `POST /api/datasets/ingest`: ingestion-compatible alias for Hugging Face imports.
+- `GET /public/export/leaderboard?format=csv|json`: export leaderboard rows.
+
+Optional write protection:
+- Set `LEADERBOARD_API_KEYS=key1,key2` to require `X-API-Key` on write/evaluation endpoints.
+- Set per-endpoint rate limits with values such as `SUBMIT_MODEL_RATE_LIMIT=10/minute`.
+- Set `ALLOWED_ORIGINS` explicitly outside local development.
+
 ---
 
 ### Models Catalog (`backend/models.py`)
@@ -254,6 +267,18 @@ curl -X POST http://localhost:5001/public/import_hf_dataset \
 ```
 
 Use `"preview_only": true` to inspect the converted payload without saving it. Imported datasets are stored in MySQL when configured, otherwise in the local in-memory store for development.
+
+Leaderboard reads support pagination and dataset filtering:
+
+```bash
+curl "http://localhost:5001/public/get_leaderboard?page=1&page_size=25&dataset=AG%20News%20Test%20Sample"
+```
+
+Exports are available as JSON or CSV:
+
+```bash
+curl "http://localhost:5001/public/export/leaderboard?format=csv" -o leaderboard.csv
+```
 
 ---
 

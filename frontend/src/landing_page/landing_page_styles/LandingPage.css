@@ -1196,8 +1196,6 @@ import MetricsRoutes from "./metrics_components/MetricsRoutes";
 import ReactGA4 from 'react-ga4';
 import { BrowserRouter as Router } from "react-router-dom";
 
-ReactGA4.initialize("G-PNX85JC0CV");
-
 function App() {
   var isDashboardSubdomain = IsDashboardSubdomain();
   var isMetricsSubdomain = IsMetricsSubdomain();
