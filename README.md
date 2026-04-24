@@ -217,9 +217,43 @@ Run the backend on port 5001 and seed example data, then start the frontend.
   - `REACT_APP_API_BASE=http://localhost:5001 npm start`
 - Open the Evaluations page to see demo scores populate.
 
+4) Optional docs site
+- Install MkDocs Material:
+  - `pip install mkdocs-material`
+- Serve the documentation:
+  - `mkdocs serve`
+- Open `http://127.0.0.1:8000`.
+
 Notes
 - The demo uses an in-memory store by default (no DB needed).
 - If you configure MySQL and load `backend/database/schema.sql`, the API will persist to DB.
+- Hugging Face imports require the optional `datasets` package:
+  - `pip install datasets`
+
+---
+
+## Metrics and Hugging Face Imports
+
+The API exposes metric metadata copied into this Flask app from the newer Personal implementation:
+
+- `GET /api/metrics` lists all known metric definitions.
+- `GET /api/metrics/task/<task_type>` lists recommended metrics for a task type.
+
+You can import a bounded Hugging Face dataset split into the leaderboard:
+
+```bash
+curl -X POST http://localhost:5001/public/import_hf_dataset \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_name": "ag_news",
+    "split": "test",
+    "limit": 100,
+    "task_type": "text_classification",
+    "display_name": "AG News Test Sample"
+  }'
+```
+
+Use `"preview_only": true` to inspect the converted payload without saving it. Imported datasets are stored in MySQL when configured, otherwise in the local in-memory store for development.
 
 ---
 

@@ -10,6 +10,7 @@ def _clean_state():
     LEADERBOARD_DATA.clear()
     _STORE['submissions'].clear()
     _STORE['evaluations'].clear()
+    _STORE['datasets'].clear()
     yield
 
 
@@ -116,3 +117,41 @@ def test_ner_and_qa_flows():
     data = res.get_json()
     assert data["success"] is True
     assert 0.9 <= data["score"] <= 1.0
+
+
+def test_metrics_catalog_endpoints():
+    client = app.test_client()
+
+    res = client.get('/api/metrics')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert "accuracy" in data["metrics"]
+
+    res = client.get('/api/metrics/task/text_classification')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert "accuracy" in data["metrics"]
+
+
+def test_in_memory_dataset_reference_data_scores_classification():
+    client = app.test_client()
+    client.post('/public/add_dataset', json={
+        "name": "stored_classification",
+        "task_type": "text_classification",
+        "evaluation_metric": "accuracy",
+        "reference_data": {"source_texts": ["a", "b"], "labels": ["yes", "no"]}
+    })
+
+    res = client.post('/public/submit_model', json={
+        "benchmarkDatasetName": "stored_classification",
+        "modelName": "classifier",
+        "modelResults": ["yes", "wrong"],
+        "sentence_ids": [0, 1]
+    })
+
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["score"] == 0.5
