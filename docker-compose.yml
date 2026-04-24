@@ -1,0 +1,35 @@
+services:
+  db:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: agents
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+
+  backend:
+    build: ./backend
+    environment:
+      PORT: 5001
+      FLASK_ENV: development
+      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      DB_HOST: db
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: agents
+      DB_PORT: 3306
+    ports:
+      - "5001:5001"
+    depends_on:
+      - db
+
+  frontend:
+    build: ./frontend
+    environment:
+      REACT_APP_API_BASE: http://localhost:5001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

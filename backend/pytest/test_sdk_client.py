@@ -1,7 +1,3 @@
-import json
-import types
-import pytest
-
 from backend.sdk.leaderboard_sdk import LeaderboardClient
 
 
@@ -21,7 +17,7 @@ class _Resp:
 def test_sdk_add_dataset(monkeypatch):
     calls = {}
 
-    def fake_request(method, url, json=None, timeout=None):
+    def fake_request(method, url, json=None, headers=None, timeout=None):
         calls['method'] = method
         calls['url'] = url
         calls['json'] = json
@@ -47,7 +43,7 @@ def test_sdk_add_dataset(monkeypatch):
 
 
 def test_sdk_list_public_datasets(monkeypatch):
-    def fake_request(method, url, json=None, timeout=None):
+    def fake_request(method, url, json=None, headers=None, timeout=None):
         return _Resp(200, {"success": True, "datasets": [{"name": "flores_spanish_translation", "task_type": "translation", "evaluation_metric": "bleu"}]})
 
     import requests
@@ -61,7 +57,7 @@ def test_sdk_list_public_datasets(monkeypatch):
 
 
 def test_sdk_submit_model(monkeypatch):
-    def fake_request(method, url, json=None, timeout=None):
+    def fake_request(method, url, json=None, headers=None, timeout=None):
         assert json["benchmarkDatasetName"] == "flores_spanish_translation"
         assert json["modelName"] == "my-model"
         assert isinstance(json["modelResults"], list)
@@ -80,4 +76,3 @@ def test_sdk_submit_model(monkeypatch):
     )
     assert res["success"] is True
     assert 0 <= res["score"] <= 1
-

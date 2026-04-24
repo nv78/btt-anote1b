@@ -28,6 +28,16 @@ def _getenv(name: str) -> str | None:
     return v if v and v.strip() else None
 
 
+def _trust_remote_code_for(model_name: str) -> bool:
+    """Remote code execution is opt-in by exact model id."""
+    allowlist = {
+        item.strip()
+        for item in os.getenv("TRUSTED_REMOTE_CODE_MODELS", "").split(",")
+        if item.strip()
+    }
+    return model_name in allowlist
+
+
 def zero_shot_gpt4o(prompt: str) -> str:
     try:
         from openai import OpenAI  # type: ignore
@@ -114,7 +124,7 @@ def zero_shot_llama3(prompt: str) -> str:
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=True,
+        trust_remote_code=_trust_remote_code_for(model_name),
     )
     pipe = pipeline(
         "text-generation",
@@ -140,7 +150,7 @@ def zero_shot_mistral(prompt: str) -> str:
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=True,
+        trust_remote_code=_trust_remote_code_for(model_name),
     )
     pipe = pipeline(
         "text-generation",
@@ -198,4 +208,3 @@ def list_models() -> List[Dict[str, str]]:
 
 def get_model_functions() -> Dict[str, Callable[[str], str]]:
     return {name: globals()[name] for name in globals() if name.startswith("zero_shot_") and callable(globals()[name])}
-

@@ -1,7 +1,6 @@
-import json
 import pytest
 
-from backend.app import app, LEADERBOARD_DATA, _STORE
+from backend.app import _RATE_WINDOWS, app, LEADERBOARD_DATA, _STORE
 
 
 @pytest.fixture(autouse=True)
@@ -11,6 +10,7 @@ def _clean_state():
     _STORE['submissions'].clear()
     _STORE['evaluations'].clear()
     _STORE['datasets'].clear()
+    _RATE_WINDOWS.clear()
     yield
 
 
@@ -33,6 +33,7 @@ def test_add_and_list_public_datasets():
     assert res.status_code in (200, 201)
     data = res.get_json()
     assert data["success"] is True
+    assert data["ok"] is True
 
     # List
     res = client.get('/public/datasets')
@@ -128,6 +129,11 @@ def test_metrics_catalog_endpoints():
     assert data["success"] is True
     assert "accuracy" in data["metrics"]
 
+    res = client.get('/openapi.json')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["openapi"].startswith("3.")
+
     res = client.get('/api/metrics/task/text_classification')
     assert res.status_code == 200
     data = res.get_json()
@@ -155,3 +161,61 @@ def test_in_memory_dataset_reference_data_scores_classification():
     data = res.get_json()
     assert data["success"] is True
     assert data["score"] == 0.5
+
+
+def test_submit_validation_rejects_blank_model_name():
+    client = app.test_client()
+
+    res = client.post('/public/submit_model', json={
+        "benchmarkDatasetName": "flores_spanish_translation",
+        "modelName": " ",
+        "modelResults": ["x"],
+        "sentence_ids": [0]
+    })
+
+    assert res.status_code == 400
+    assert res.get_json()["success"] is False
+
+
+def test_leaderboard_pagination_metadata_and_export():
+    client = app.test_client()
+    client.post('/public/submit_model', json={
+        "benchmarkDatasetName": "flores_spanish_translation",
+        "modelName": "meta-model",
+        "modelResults": ["Este es un ejemplo de oración para evaluación."],
+        "sentence_ids": [0],
+        "metadata": {"model_version": "1.0"}
+    })
+
+    res = client.get('/public/get_leaderboard?page=1&page_size=1')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["page"] == 1
+    assert data["page_size"] == 1
+    assert data["total"] == 1
+    assert data["leaderboard"][0]["metadata"]["model_version"] == "1.0"
+
+    res = client.get('/public/export/leaderboard?format=csv')
+    assert res.status_code == 200
+    assert res.mimetype == "text/csv"
+    assert "meta-model" in res.get_data(as_text=True)
+
+
+def test_api_key_required_when_configured(monkeypatch):
+    monkeypatch.setenv("LEADERBOARD_API_KEYS", "secret")
+    client = app.test_client()
+
+    res = client.post('/public/add_dataset', json={
+        "name": "blocked",
+        "task_type": "text_classification",
+        "evaluation_metric": "accuracy",
+    })
+    assert res.status_code == 401
+
+    res = client.post('/public/add_dataset', headers={"X-API-Key": "secret"}, json={
+        "name": "allowed",
+        "task_type": "text_classification",
+        "evaluation_metric": "accuracy",
+    })
+    assert res.status_code == 200

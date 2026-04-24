@@ -15,6 +15,7 @@ TASK_DEFAULTS = {
     "document_qa": {"primary_metric": "exact", "answer_keys": ["answers", "answer"]},
     "line_qa": {"primary_metric": "exact", "answer_keys": ["answers", "answer"]},
     "translation": {"primary_metric": "bleu", "answer_keys": ["translation", "target", "answer"]},
+    "named_entity_recognition": {"primary_metric": "f1", "answer_keys": ["entities", "ner_tags", "answer"]},
 }
 
 KNOWN_DATASETS = {
@@ -23,6 +24,12 @@ KNOWN_DATASETS = {
     "nyu-mll/glue": "text_classification",
     "squad": "document_qa",
     "rajpurkar/squad": "document_qa",
+}
+
+TASK_ALIASES = {
+    "classification": "text_classification",
+    "qa": "document_qa",
+    "ner": "named_entity_recognition",
 }
 
 
@@ -48,8 +55,17 @@ def _load_dataset(dataset_name: str, config: Optional[str], split: str):
 
 def infer_task_type(dataset_name: str, requested_task_type: Optional[str] = None) -> str:
     if requested_task_type:
-        return requested_task_type
+        return TASK_ALIASES.get(requested_task_type, requested_task_type)
     return KNOWN_DATASETS.get(dataset_name, "text_classification")
+
+
+def _label_names(ds) -> Optional[List[str]]:
+    try:
+        feature = ds.features.get("label")
+        names = getattr(feature, "names", None)
+        return list(names) if names else None
+    except Exception:
+        return None
 
 
 def _first_present(row: Dict[str, Any], keys: List[str]) -> Any:
@@ -59,8 +75,10 @@ def _first_present(row: Dict[str, Any], keys: List[str]) -> Any:
     return None
 
 
-def _answer_from_row(row: Dict[str, Any], task_type: str) -> Any:
+def _answer_from_row(row: Dict[str, Any], task_type: str, label_names: Optional[List[str]] = None) -> Any:
     answer = _first_present(row, TASK_DEFAULTS.get(task_type, TASK_DEFAULTS["text_classification"])["answer_keys"])
+    if isinstance(answer, int) and label_names and 0 <= answer < len(label_names):
+        return label_names[answer]
     if isinstance(answer, dict) and isinstance(answer.get("text"), list):
         return answer["text"][0] if len(answer["text"]) == 1 else answer["text"]
     if isinstance(answer, dict):
@@ -95,6 +113,7 @@ def import_hf_dataset(
     metric = TASK_DEFAULTS.get(resolved_task_type, TASK_DEFAULTS["text_classification"])["primary_metric"]
     ds = _load_dataset(dataset_name, config, split)
     count = min(limit, len(ds))
+    label_names = _label_names(ds)
 
     source_texts = []
     answers = []
@@ -103,7 +122,7 @@ def import_hf_dataset(
     for idx in range(count):
         row = dict(ds[idx])
         question = _question_from_row(row)
-        answer = _answer_from_row(row, resolved_task_type)
+        answer = _answer_from_row(row, resolved_task_type, label_names)
         source_texts.append(question)
         if resolved_task_type == "text_classification":
             labels.append(str(answer))
@@ -119,6 +138,7 @@ def import_hf_dataset(
         "hf_dataset": dataset_name,
         "hf_config": config,
         "hf_split": split,
+        "label_names": label_names,
     }
     if labels:
         reference_data["labels"] = labels

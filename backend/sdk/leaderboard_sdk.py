@@ -16,22 +16,27 @@ from typing import Any, Dict, Optional
 
 
 class LeaderboardClient:
-    def __init__(self, base_url: Optional[str] = None, timeout: int = 20):
+    def __init__(self, base_url: Optional[str] = None, timeout: int = 20, api_key: Optional[str] = None):
         self.base_url = base_url or os.getenv("LEADERBOARD_API_BASE", "http://localhost:5001")
         self.timeout = timeout
+        self.api_key = api_key or os.getenv("LEADERBOARD_API_KEY")
 
     def _request(self, method: str, path: str, json: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
-        r = requests.request(method, url, json=json, timeout=self.timeout)
+        headers = {"X-API-Key": self.api_key} if self.api_key else None
+        r = requests.request(method, url, json=json, headers=headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
 
     # Curated leaderboard
     def add_dataset(self, name: str, task_type: str, url: Optional[str] = None, description: Optional[str] = None, models: Optional[list] = None) -> Dict[str, Any]:
         payload = {"name": name, "task_type": task_type}
-        if url: payload["url"] = url
-        if description: payload["description"] = description
-        if models: payload["models"] = models
+        if url:
+            payload["url"] = url
+        if description:
+            payload["description"] = description
+        if models:
+            payload["models"] = models
         return self._request("POST", "/api/leaderboard/add_dataset", json=payload)
 
     def add_model(self, dataset_name: str, model: str, rank: Optional[int], score: Optional[float], updated: str, ci: Optional[str] = None) -> Dict[str, Any]:
@@ -54,22 +59,48 @@ class LeaderboardClient:
         return self._request("POST", "/public/add_dataset", json=payload)
 
     # Evaluation endpoints (optional)
-    def get_leaderboard(self) -> Dict[str, Any]:
-        return self._request("GET", "/public/get_leaderboard")
+    def get_leaderboard(self, dataset: Optional[str] = None, page: int = 1, page_size: int = 25) -> Dict[str, Any]:
+        import urllib.parse as _u
+
+        params = {"page": page, "page_size": page_size}
+        if dataset:
+            params["dataset"] = dataset
+        return self._request("GET", f"/public/get_leaderboard?{_u.urlencode(params)}")
 
     def get_source_sentences(self, dataset_name: str = "flores_spanish_translation", count: int = 3, start_idx: int = 0) -> Dict[str, Any]:
         import urllib.parse as _u
         qs = _u.urlencode({"dataset_name": dataset_name, "count": count, "start_idx": start_idx})
         return self._request("GET", f"/public/get_source_sentences?{qs}")
 
-    def submit_model(self, benchmark_dataset_name: str, model_name: str, model_results: list[str], sentence_ids: list[int]) -> Dict[str, Any]:
+    def submit_model(
+        self,
+        benchmark_dataset_name: str,
+        model_name: str,
+        model_results: list[str],
+        sentence_ids: list[int],
+        metadata: Optional[dict] = None,
+    ) -> Dict[str, Any]:
         payload = {
             "benchmarkDatasetName": benchmark_dataset_name,
             "modelName": model_name,
             "modelResults": model_results,
             "sentence_ids": sentence_ids,
         }
+        if metadata:
+            payload["metadata"] = metadata
         return self._request("POST", "/public/submit_model", json=payload)
+
+    def import_hf_dataset(self, dataset_name: str, split: str = "test", limit: int = 100, **kwargs) -> Dict[str, Any]:
+        payload = {"dataset_name": dataset_name, "split": split, "limit": limit, **kwargs}
+        return self._request("POST", "/public/import_hf_dataset", json=payload)
+
+    def export_leaderboard(self, dataset: Optional[str] = None, format: str = "json") -> Dict[str, Any]:
+        import urllib.parse as _u
+
+        params = {"format": format}
+        if dataset:
+            params["dataset"] = dataset
+        return self._request("GET", f"/public/export/leaderboard?{_u.urlencode(params)}")
 
     # CSV benchmarks
     def list_benchmark_csvs(self) -> Dict[str, Any]:

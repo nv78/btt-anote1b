@@ -33,6 +33,14 @@ REACT_APP_API_BASE=http://localhost:5001 npm start
 
 Open `http://localhost:3000`.
 
+## Docker Compose
+
+```bash
+docker compose up --build
+```
+
+This starts MySQL, the Flask backend on `http://localhost:5001`, and the React frontend on `http://localhost:3000`.
+
 ## Docs
 
 ```bash

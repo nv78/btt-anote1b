@@ -2,9 +2,13 @@
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
 
 async function http(method, path, body) {
+  const apiKey = process.env.REACT_APP_LEADERBOARD_API_KEY;
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -21,6 +25,7 @@ export const LeaderboardSDK = {
   listDatasets: () => http('GET', '/api/leaderboard/list'),
   listPublicDatasets: () => http('GET', '/public/datasets'),
   addDatasetPublic: (payload) => http('POST', '/public/add_dataset', payload),
+  importHfDataset: (payload) => http('POST', '/public/import_hf_dataset', payload),
   getLeaderboard: () => http('GET', '/public/get_leaderboard'),
   listBenchmarkCsvs: () => http('GET', '/public/benchmark_csvs'),
   listBenchmarkModels: () => http('GET', '/public/benchmark_models'),
