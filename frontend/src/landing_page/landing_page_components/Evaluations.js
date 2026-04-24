@@ -144,48 +144,84 @@ const Evaluations = () => {
       ) : (
       <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
         {filteredDatasets.map((dataset, i) => (
-          <div key={i} className="bg-gray-950 p-6 rounded-lg shadow-md border border-gray-800 hover:border-[#defe47]/50 transition-colors">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-semibold text-[#defe47]">{dataset.name}</h2>
-              <span className="text-xs text-gray-300 border border-gray-700 rounded-md px-2 py-0.5">{dataset.task_type || '—'} / {dataset.evaluation_metric || '—'}</span>
-            </div>
-            <div className="flex items-center gap-3 mb-2">
-              {dataset.url ? (
-                <a href={dataset.url} target="_blank" rel="noopener noreferrer" className="text-sm text-[#defe47] hover:underline">View Dataset</a>
-              ) : null}
-              <button
-                className="text-sm text-[#defe47] hover:underline"
-                onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
-              >
-                Details
-              </button>
-            </div>
-            <div className="mt-2 space-y-2">
-              {dataset.models.slice(0, 5).map((m) => (
-                <div
-                  key={m.rank}
-                  className="flex items-center justify-between bg-gray-900 p-3 rounded-md border border-gray-800"
+          <div key={i} className="flex flex-col bg-[#0d1117] rounded-xl shadow-md border border-gray-800 hover:border-[#defe47]/40 transition-colors overflow-hidden">
+            {/* Card header */}
+            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/70">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>{dataset.name}</h2>
+                {(dataset.task_type || dataset.evaluation_metric) && (
+                  <span className="mt-1 inline-block text-xs text-gray-500 font-medium">
+                    {[dataset.task_type, dataset.evaluation_metric].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {dataset.url && (
+                  <a
+                    href={dataset.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#defe47] hover:border-[#defe47]/40 transition-colors"
+                  >
+                    Dataset ↗
+                  </a>
+                )}
+                <button
+                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#28b2fb] hover:border-[#28b2fb]/40 transition-colors"
+                  onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
                 >
-                  <div>
-                    <p className="font-medium text-white">
-                      {m.rank}. {m.model}
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      Updated: {m.updated}
-                    </p>
-                  </div>
-                  <div className="text-lg font-bold text-[#28b2fb]">{typeof m.score === 'number' ? m.score.toFixed(3) : m.score}</div>
-                </div>
-              ))}
+                  Details
+                </button>
+              </div>
+            </div>
+
+            {/* Rankings table */}
+            <div className="flex-1">
+              <div className="grid grid-cols-[3rem_1fr_6rem] text-[11px] font-semibold uppercase tracking-widest text-gray-500 px-5 py-2.5 border-b border-gray-700/50">
+                <div>Rank</div>
+                <div>Model</div>
+                <div className="text-right">Score</div>
+              </div>
+              <div className="divide-y divide-gray-700/25">
+                {dataset.models.slice(0, 5).map((m, mIdx) => {
+                  const isTop = m.rank === 1;
+                  const score = typeof m.score === 'number' ? m.score.toFixed(3) : m.score;
+                  const rankEmoji = m.rank === 1 ? '🥇' : m.rank === 2 ? '🥈' : m.rank === 3 ? '🥉' : null;
+                  return (
+                    <div
+                      key={m.rank}
+                      className={[
+                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-3 text-sm transition-colors",
+                        isTop
+                          ? "bg-[#defe47]/[0.06] hover:bg-[#defe47]/[0.1]"
+                          : mIdx % 2 === 1
+                            ? "bg-white/[0.018] hover:bg-white/[0.045]"
+                            : "hover:bg-white/[0.045]"
+                      ].join(' ')}
+                    >
+                      <div className="flex items-center gap-1">
+                        {rankEmoji
+                          ? <span className="mr-0.5">{rankEmoji}</span>
+                          : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-700/50 text-[11px] text-gray-400 tabular-nums font-mono">{m.rank}</span>
+                        }
+                      </div>
+                      <div className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')} title={m.model}>
+                        {m.model}
+                      </div>
+                      <div className="text-right">
+                        <span className={["tabular-nums font-semibold", isTop ? "text-[#defe47]" : m.rank === 2 ? "text-gray-100" : "text-gray-300"].join(' ')}>
+                          {score}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
               {dataset.models.length > 5 && (
-                <div className="mt-4 text-center">
+                <div className="px-5 py-3 border-t border-gray-700/25 text-center">
                   <button
-                    onClick={() => navigate('/leaderboard', {
-                      state: {
-                        selectedDataset: dataset.name
-                      }
-                    })}
-                    className="text-[#defe47] hover:text-[#28b2fb] underline text-sm font-medium transition-colors"
+                    onClick={() => navigate('/leaderboard', { state: { selectedDataset: dataset.name } })}
+                    className="text-xs text-gray-400 hover:text-[#defe47] transition-colors font-medium"
                   >
                     View all {dataset.models.length} models →
                   </button>
