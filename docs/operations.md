@@ -4,7 +4,7 @@
 
 Local development works without a database. The API stores custom datasets, imported datasets, submissions, and evaluations in memory.
 
-For persistence, configure MySQL environment variables and load `backend/database/schema.sql`:
+For persistence, configure MySQL environment variables and load `backend/database/schema.sql`. The compose setup mounts that schema directly into MySQL initialization:
 
 ```bash
 export DB_HOST=localhost
@@ -13,6 +13,8 @@ export DB_PASSWORD=
 export DB_NAME=agents
 export DB_PORT=3306
 ```
+
+The Personal repo's richer SQLAlchemy schema uses `datasets`, `submissions`, and `leaderboard_entries`. This Flask app keeps its existing MySQL table names for compatibility, while the import/evaluation payload shapes now match the Personal implementation closely enough to migrate later without changing clients.
 
 ## Configuration
 

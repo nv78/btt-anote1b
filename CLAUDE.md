@@ -176,6 +176,12 @@ When running locally, override with `REACT_APP_API_ENDPOINT=http://localhost:500
 | GET | `/public/get_source_sentences` | Sentences to translate (for evaluation) |
 | POST | `/public/submit_model` | Submit model predictions for scoring |
 | GET | `/public/get_leaderboard` | Ranked model results |
+| GET | `/public/export/leaderboard` | Export leaderboard rows |
+| POST | `/public/import_hf_dataset` | Import a Hugging Face dataset split |
+| POST | `/api/datasets/ingest` | Ingestion-compatible dataset import endpoint |
+| GET | `/api/metrics` | Metric catalog |
+| GET | `/api/metrics/task/<task_type>` | Task-specific metric catalog |
+| GET | `/openapi.json` | Machine-readable API description |
 | GET | `/public/benchmark_csvs` | List CSV benchmark files |
 | POST | `/public/run_csv_benchmarks` | Benchmark models against CSV datasets |
 | POST | `/api/leaderboard/add_dataset` | Add a new benchmark dataset |

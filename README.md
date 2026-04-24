@@ -230,6 +230,10 @@ Run the backend on port 5001 and seed example data, then start the frontend.
   - `REACT_APP_API_BASE=http://localhost:5001 npm start`
 - Open the Evaluations page to see demo scores populate.
 
+Docker option:
+- `docker compose up --build`
+- Open `http://localhost:3000` and use `http://localhost:5001` for the API.
+
 4) Optional docs site
 - Install MkDocs Material:
   - `pip install mkdocs-material`

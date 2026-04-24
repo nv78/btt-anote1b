@@ -958,6 +958,35 @@ def list_task_metrics(task_type):
     return jsonify({"success": True, "task_type": task_type, "metrics": metrics_for_task(task_type)})
 
 
+@app.get('/openapi.json')
+def openapi_spec():
+    """Small OpenAPI document for public integration endpoints."""
+    return jsonify({
+        "openapi": "3.0.3",
+        "info": {"title": "Anote Leaderboard API", "version": "0.2.0"},
+        "paths": {
+            "/public/datasets": {"get": {"summary": "List public datasets"}},
+            "/public/add_dataset": {"post": {"summary": "Create a public dataset"}},
+            "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split"}},
+            "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source"}},
+            "/public/submit_model": {"post": {"summary": "Submit model outputs for evaluation"}},
+            "/public/get_leaderboard": {
+                "get": {
+                    "summary": "Get leaderboard rows",
+                    "parameters": [
+                        {"name": "dataset", "in": "query", "schema": {"type": "string"}},
+                        {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}},
+                        {"name": "page_size", "in": "query", "schema": {"type": "integer", "default": 25}},
+                    ],
+                }
+            },
+            "/public/export/leaderboard": {"get": {"summary": "Export leaderboard rows as CSV or JSON"}},
+            "/api/metrics": {"get": {"summary": "List metric metadata"}},
+            "/api/metrics/task/{task_type}": {"get": {"summary": "List metrics for a task type"}},
+        },
+    })
+
+
 @app.post('/public/import_hf_dataset')
 @rate_limit("IMPORT_DATASET_RATE_LIMIT", "5/minute")
 @require_api_key

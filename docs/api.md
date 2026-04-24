@@ -26,6 +26,7 @@ curl -H "X-API-Key: secret-key-1" ...
 ```bash
 curl http://localhost:5001/api/metrics
 curl http://localhost:5001/api/metrics/task/text_classification
+curl http://localhost:5001/openapi.json
 ```
 
 ## Add a Dataset

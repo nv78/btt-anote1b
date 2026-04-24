@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { submittoleaderboardPath } from "../../constants/RouteConstants";
+import { addDatasetPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || process.env.REACT_APP_BACK_END_HOST || "http://localhost:5001";
 
@@ -107,12 +107,20 @@ const Evaluations = () => {
           Evaluation Leaderboard
         </h1>
 
-        <button
-          className="btn-black px-6 py-2 border border-yellow rounded hover:bg-white hover:text-white transition mb-6"
-          onClick={handleSubmitToLeaderboard}
-        >
-        Submit Model to Leaderboard
-        </button>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
+          <button
+            className="btn-black px-6 py-2 border border-yellow rounded hover:bg-white hover:text-white transition"
+            onClick={handleSubmitToLeaderboard}
+          >
+          Submit Model to Leaderboard
+          </button>
+          <button
+            className="px-6 py-2 border border-gray-700 rounded text-gray-200 hover:bg-gray-900 transition"
+            onClick={() => navigate(addDatasetPath)}
+          >
+            Add Dataset
+          </button>
+        </div>
         <div className="max-w-xl mx-auto mt-2">
           <input
             type="text"

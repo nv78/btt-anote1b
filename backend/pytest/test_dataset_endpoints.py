@@ -129,6 +129,11 @@ def test_metrics_catalog_endpoints():
     assert data["success"] is True
     assert "accuracy" in data["metrics"]
 
+    res = client.get('/openapi.json')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["openapi"].startswith("3.")
+
     res = client.get('/api/metrics/task/text_classification')
     assert res.status_code == 200
     data = res.get_json()
