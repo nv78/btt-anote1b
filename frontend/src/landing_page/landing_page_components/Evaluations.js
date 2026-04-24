@@ -87,34 +87,34 @@ const Evaluations = () => {
   }, [datasets, query]);
 
   return (
-    <section className="bg-black min-h-screen py-10 px-4 text-gray-100">
+    <section className="bg-[#111827] min-h-screen py-10 px-4 text-gray-100">
       <div className="text-center mb-6">
-        <div className="text-xs uppercase tracking-[0.2em] text-[#EDDC8F] mb-3">Live Results</div>
-        <h1 className="text-4xl sm:text-5xl font-extrabold bg-gradient-to-r from-[#EDDC8F] to-[#F1CA57] bg-clip-text text-transparent mb-4">
+        <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Live Results</div>
+        <h1 className="text-4xl sm:text-5xl font-extrabold bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent mb-4">
           Evaluation Leaderboard
         </h1>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
           <button
-            className="px-6 py-2 rounded-md border border-[#EDDC8F] bg-[#EDDC8F] text-black font-semibold hover:bg-[#F1CA57] transition"
+            className="px-6 py-2 rounded-md border border-[#defe47] bg-[#defe47] text-black font-semibold hover:bg-[#28b2fb] transition"
             onClick={() => navigate("/")}
           >
             Main Leaderboard
           </button>
           <button
-            className="px-6 py-2 rounded-md border border-[#EDDC8F]/60 text-[#EDDC8F] hover:bg-[#EDDC8F]/10 transition"
+            className="px-6 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 transition"
             onClick={() => navigate(submittoleaderboardPath)}
           >
             Submit Model
           </button>
           <button
-            className="px-6 py-2 rounded-md border border-[#EDDC8F]/60 text-[#EDDC8F] hover:bg-[#EDDC8F]/10 transition"
+            className="px-6 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 transition"
             onClick={() => navigate(addDatasetPath)}
           >
             Add Dataset
           </button>
           <button
-            className="px-6 py-2 rounded-md border border-[#EDDC8F]/60 text-[#EDDC8F] hover:bg-[#EDDC8F]/10 transition"
+            className="px-6 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 transition"
             onClick={() => navigate(csvBenchmarksPath)}
           >
             Run Benchmarks
@@ -126,7 +126,7 @@ const Evaluations = () => {
             placeholder="Search by dataset, model, task, or metric"
             value={query}
             onChange={(e)=>setQuery(e.target.value)}
-            className="w-full px-4 py-2 rounded-md bg-gray-950 border border-gray-800 text-gray-200 focus:outline-none focus:border-[#EDDC8F]/70"
+            className="w-full px-4 py-2 rounded-md bg-gray-950 border border-gray-800 text-gray-200 focus:outline-none focus:border-[#defe47]/70"
           />
         </div>
       </div>
@@ -144,17 +144,17 @@ const Evaluations = () => {
       ) : (
       <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
         {filteredDatasets.map((dataset, i) => (
-          <div key={i} className="bg-gray-950 p-6 rounded-lg shadow-md border border-gray-800 hover:border-[#EDDC8F]/50 transition-colors">
+          <div key={i} className="bg-gray-950 p-6 rounded-lg shadow-md border border-gray-800 hover:border-[#defe47]/50 transition-colors">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-semibold text-[#EDDC8F]">{dataset.name}</h2>
+              <h2 className="text-xl font-semibold text-[#defe47]">{dataset.name}</h2>
               <span className="text-xs text-gray-300 border border-gray-700 rounded-md px-2 py-0.5">{dataset.task_type || '—'} / {dataset.evaluation_metric || '—'}</span>
             </div>
             <div className="flex items-center gap-3 mb-2">
               {dataset.url ? (
-                <a href={dataset.url} target="_blank" rel="noopener noreferrer" className="text-sm text-[#EDDC8F] hover:underline">View Dataset</a>
+                <a href={dataset.url} target="_blank" rel="noopener noreferrer" className="text-sm text-[#defe47] hover:underline">View Dataset</a>
               ) : null}
               <button
-                className="text-sm text-[#EDDC8F] hover:underline"
+                className="text-sm text-[#defe47] hover:underline"
                 onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
               >
                 Details
@@ -174,7 +174,7 @@ const Evaluations = () => {
                       Updated: {m.updated}
                     </p>
                   </div>
-                  <div className="text-lg font-bold text-[#F1CA57]">{typeof m.score === 'number' ? m.score.toFixed(3) : m.score}</div>
+                  <div className="text-lg font-bold text-[#28b2fb]">{typeof m.score === 'number' ? m.score.toFixed(3) : m.score}</div>
                 </div>
               ))}
               {dataset.models.length > 5 && (
@@ -185,7 +185,7 @@ const Evaluations = () => {
                         selectedDataset: dataset.name
                       }
                     })}
-                    className="text-[#EDDC8F] hover:text-[#F1CA57] underline text-sm font-medium transition-colors"
+                    className="text-[#defe47] hover:text-[#28b2fb] underline text-sm font-medium transition-colors"
                   >
                     View all {dataset.models.length} models →
                   </button>

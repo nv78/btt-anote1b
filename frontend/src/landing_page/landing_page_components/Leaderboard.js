@@ -1027,10 +1027,10 @@ const Leaderboard = () => {
   ];
   const navigate = useNavigate();
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-black pb-24 px-4 text-gray-100">
+    <div className="flex flex-col items-center justify-start min-h-screen bg-[#111827] pb-24 px-4 text-gray-100">
       <header className="w-full max-w-7xl mt-10 pt-10 text-center">
-        <div className="text-xs uppercase tracking-[0.2em] text-[#EDDC8F] mb-3">Anote Evaluations</div>
-        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-[#EDDC8F] to-[#F1CA57] bg-clip-text text-transparent">
+        <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Anote Evaluations</div>
+        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">
           Model Leaderboard
         </h1>
         <p className="mt-3 text-gray-300/90 text-sm md:text-base max-w-2xl mx-auto">
@@ -1039,25 +1039,25 @@ const Leaderboard = () => {
       </header>
       <div className="flex flex-wrap justify-center gap-3 mt-6">
         <button
-          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-[#EDDC8F] bg-[#EDDC8F] text-black hover:bg-[#F1CA57]"
+          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-[#defe47] bg-[#defe47] text-black hover:bg-[#28b2fb]"
           onClick={() => navigate(evaluationsPath)}
         >
           View Evaluations
         </button>
         <button
-          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-[#EDDC8F]/70 text-[#EDDC8F] hover:bg-[#EDDC8F]/10"
+          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-[#defe47]/70 text-[#defe47] hover:bg-[#defe47]/10"
           onClick={() => navigate(submittoleaderboardPath)}
         >
           Submit Model
         </button>
         <button
-          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-gray-700 text-gray-200 hover:border-[#EDDC8F]/60 hover:text-[#EDDC8F]"
+          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-gray-700 text-gray-200 hover:border-[#defe47]/60 hover:text-[#defe47]"
           onClick={() => navigate(addDatasetPath)}
         >
           Add Dataset
         </button>
         <button
-          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-gray-700 text-gray-200 hover:border-[#EDDC8F]/60 hover:text-[#EDDC8F]"
+          className="px-6 py-2 rounded-md text-base font-semibold transition-colors border border-gray-700 text-gray-200 hover:border-[#defe47]/60 hover:text-[#defe47]"
           onClick={() => navigate(csvBenchmarksPath)}
         >
           Run Benchmarks
@@ -1078,16 +1078,16 @@ const Leaderboard = () => {
         {(viewMode==='curated' ? (curatedDatasets.length ? curatedDatasets : datasets) : (liveDatasets.length ? liveDatasets : datasets)).map((dataset, index) => (
           <div
             key={index}
-            className="w-full p-5 md:p-6 bg-gray-950 rounded-lg shadow-lg border border-gray-800 hover:border-[#EDDC8F]/50 transition-colors"
+            className="w-full p-5 md:p-6 bg-gray-950 rounded-lg shadow-lg border border-gray-800 hover:border-[#defe47]/50 transition-colors"
           >
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-              <h2 className="text-lg md:text-xl font-bold text-[#EDDC8F]">
+              <h2 className="text-lg md:text-xl font-bold text-[#defe47]">
                 {dataset.name}
               </h2>
               {dataset.url ? (
                 <a
                   href={dataset.url}
-                  className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-md border border-gray-700 text-[#EDDC8F] hover:bg-[#EDDC8F]/10 transition-colors"
+                  className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-md border border-gray-700 text-[#defe47] hover:bg-[#defe47]/10 transition-colors"
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`Open dataset ${dataset.name}`}
@@ -1101,7 +1101,7 @@ const Leaderboard = () => {
                 </span>
               )}
               <button
-                className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-md border border-[#EDDC8F]/50 text-[#EDDC8F] hover:bg-[#EDDC8F]/10 transition-colors"
+                className="inline-flex items-center gap-2 text-xs md:text-sm px-3 py-1.5 rounded-md border border-[#defe47]/50 text-[#defe47] hover:bg-[#defe47]/10 transition-colors"
                 onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
               >
                 Details
@@ -1120,12 +1120,12 @@ const Leaderboard = () => {
                   .map((model, modelIndex) => {
                     const isTop = model.rank === 1;
                     const rowBase = "grid grid-cols-3 text-center px-4 py-3 text-white hover:bg-gray-700/50 transition-colors";
-                    const topBg = isTop ? " bg-[#EDDC8F]/10" : "";
+                    const topBg = isTop ? " bg-[#defe47]/10" : "";
                     const score = typeof model.score === 'number' ? model.score.toFixed(model.score < 1 ? 3 : 2) : model.score;
                     return (
                       <div key={modelIndex} className={rowBase + topBg}>
                         <div className="font-semibold">
-                          {isTop ? <span title="Top model" className="mr-1 text-[#EDDC8F]">#</span> : null}
+                          {isTop ? <span title="Top model" className="mr-1 text-[#defe47]">#</span> : null}
                           {model.rank}
                         </div>
                         <div className="truncate" title={model.model}>{model.model}</div>
@@ -1143,10 +1143,10 @@ const Leaderboard = () => {
       {/* FAQs Section */}
       <div className="w-full max-w-5xl mx-auto mt-20 px-2">
         <div className="bg-gray-950 rounded-lg p-6 md:p-10 border border-gray-800">
-          <div className="text-[#EDDC8F] text-2xl md:text-3xl font-semibold mb-6 md:mb-8">FAQs</div>
+          <div className="text-[#defe47] text-2xl md:text-3xl font-semibold mb-6 md:mb-8">FAQs</div>
           {faqs.map((faq, index) => (
             <div
-              className="bg-gray-900 px-5 py-4 my-4 rounded-lg cursor-pointer border border-gray-800 hover:border-[#EDDC8F]/50 transition-colors"
+              className="bg-gray-900 px-5 py-4 my-4 rounded-lg cursor-pointer border border-gray-800 hover:border-[#defe47]/50 transition-colors"
               onClick={() => handleClick(index)}
               key={index}
             >

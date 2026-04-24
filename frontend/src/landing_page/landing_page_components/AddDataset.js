@@ -97,24 +97,24 @@ const AddDataset = () => {
   };
 
   return (
-    <section className="bg-black min-h-screen py-10 px-4 text-gray-100">
+    <section className="bg-[#111827] min-h-screen py-10 px-4 text-gray-100">
       <div className="max-w-4xl mx-auto">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
           <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-[#EDDC8F] mb-3">Dataset Registry</div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-[#EDDC8F] to-[#F1CA57] bg-clip-text text-transparent">Add Dataset</h1>
+            <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Dataset Registry</div>
+            <h1 className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">Add Dataset</h1>
           </div>
           <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="px-3 py-2 rounded-md border border-[#EDDC8F] bg-[#EDDC8F] text-black font-semibold hover:bg-[#F1CA57]"
+            className="px-3 py-2 rounded-md border border-[#defe47] bg-[#defe47] text-black font-semibold hover:bg-[#28b2fb]"
             onClick={() => navigate(evaluationsPath)}
           >
             View Evaluations
           </button>
           <button
             type="button"
-            className="px-3 py-2 rounded-md border border-[#EDDC8F]/60 text-[#EDDC8F] hover:bg-[#EDDC8F]/10"
+            className="px-3 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10"
             onClick={() => navigate(submittoleaderboardPath)}
           >
             Submit Model
@@ -318,7 +318,7 @@ const AddDataset = () => {
           <button
             type="submit"
             disabled={submitting}
-            className="px-5 py-2 rounded-md border border-[#EDDC8F] text-[#EDDC8F] hover:bg-[#EDDC8F] hover:text-black disabled:opacity-50"
+            className="px-5 py-2 rounded-md border border-[#defe47] text-[#defe47] hover:bg-[#defe47] hover:text-black disabled:opacity-50"
           >
             {submitting ? "Saving..." : "Save Dataset"}
           </button>
