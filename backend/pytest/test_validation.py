@@ -1,4 +1,3 @@
-import json
 import pytest
 
 from backend.app import app, LEADERBOARD_DATA, _STORE
