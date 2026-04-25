@@ -144,7 +144,7 @@ def rate_limit(env_name, default_limit):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if os.getenv("DISABLE_RATE_LIMIT", "").lower() in {"1", "true", "yes"}:
+            if app.testing or os.getenv("DISABLE_RATE_LIMIT", "").lower() in {"1", "true", "yes"}:
                 return fn(*args, **kwargs)
             raw_limit = os.getenv(env_name, default_limit)
             match = re.match(r"^(\d+)/minute$", raw_limit)
@@ -1096,7 +1096,7 @@ def ingest_dataset():
 def export_leaderboard():
     """Export leaderboard rows as CSV or JSON."""
     dataset_name = request.args.get("dataset")
-    export_format = (request.args.get("format") or "csv").lower()
+    export_format = (request.args.get("format") or "json").lower()
     with app.test_request_context(
         "/public/get_leaderboard",
         query_string={
@@ -1108,7 +1108,7 @@ def export_leaderboard():
         payload = get_leaderboard().get_json()
     rows = payload.get("leaderboard", []) if payload else []
     if export_format == "json":
-        return jsonify({"success": True, "leaderboard": rows})
+        return jsonify(rows)
     if export_format != "csv":
         return jsonify({"success": False, "error": "format must be csv or json"}), 400
 
