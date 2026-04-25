@@ -1039,7 +1039,7 @@ const Leaderboard = () => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-[#0a0f1a] pb-24 px-4 text-gray-100">
+    <div className="flex flex-col items-center justify-start min-h-screen bg-[#111827] pb-24 px-4 text-gray-100">
 
       {/* ── Hero ── */}
       <header className="w-full max-w-4xl mt-10 pt-4 text-center relative">
@@ -1048,61 +1048,19 @@ const Leaderboard = () => {
           <div className="w-96 h-40 rounded-full bg-[#defe47]/[0.04] blur-3xl" />
         </div>
         <div className="relative">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#28b2fb]/[0.08] border border-[#28b2fb]/20 text-xs uppercase tracking-[0.18em] text-[#28b2fb] mb-4 font-medium">
+          {/* <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#28b2fb]/[0.08] border border-[#28b2fb]/20 text-xs uppercase tracking-[0.18em] text-[#28b2fb] mb-4 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-[#28b2fb] animate-pulse" />
             Anote Evaluations
-          </div>
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight bg-gradient-to-r from-[#defe47] via-[#b8f030] to-[#28b2fb] bg-clip-text text-transparent leading-tight">
+          </div> */}
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight bg-white bg-clip-text text-transparent leading-tight">
             Model Leaderboard
           </h1>
           <p className="mt-4 text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed">
-            Transparent, community-driven benchmarking. Compare models, submit results, and track performance across diverse datasets.
+            Compare models, submit results, and track model performance.
           </p>
-
-          {/* Stat pills */}
-          <div className="flex flex-wrap justify-center gap-2.5 mt-6">
-            {[
-              { label: 'Datasets', value: displayDatasets.length || '10+' },
-              { label: 'Task types', value: '4+' },
-              { label: 'Open source', value: '✓' },
-            ].map(({ label, value }) => (
-              <span key={label} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-xs text-gray-300 backdrop-blur-sm">
-                <span className="font-semibold text-white">{value}</span>
-                {label}
-              </span>
-            ))}
-          </div>
         </div>
       </header>
 
-      {/* ── CTA buttons ── */}
-      <div className="flex flex-wrap justify-center gap-2 mt-7">
-        <button
-          className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all bg-[#defe47] text-black hover:bg-[#eeff5a] active:scale-95 shadow-lg shadow-[#defe47]/10"
-          onClick={() => navigate(evaluationsPath)}
-        >
-          View Evaluations
-        </button>
-        <button
-          className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all border border-[#defe47]/50 text-[#defe47] hover:bg-[#defe47]/10 active:scale-95"
-          onClick={() => navigate(submittoleaderboardPath)}
-        >
-          Submit Model
-        </button>
-        <div className="hidden sm:block w-px bg-gray-700/60 mx-1 self-stretch" />
-        <button
-          className="px-5 py-2.5 rounded-lg text-sm font-medium transition-all border border-gray-700/80 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
-          onClick={() => navigate(addDatasetPath)}
-        >
-          Add Dataset
-        </button>
-        <button
-          className="px-5 py-2.5 rounded-lg text-sm font-medium transition-all border border-gray-700/80 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
-          onClick={() => navigate(csvBenchmarksPath)}
-        >
-          Run Benchmarks
-        </button>
-      </div>
 
       {/* ── Loading / error ── */}
       {loading && (

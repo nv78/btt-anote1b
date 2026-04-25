@@ -57,7 +57,7 @@ function LandingPage() {
   let robotMetaTag = robotHeader();
 
   return (
-    <div className="bg-[#0a0f1a] min-h-screen">
+    <div className="bg-[#111827] min-h-screen">
       <Helmet>
         <title>Anote - Model Leaderboard</title>
         {robotMetaTag}

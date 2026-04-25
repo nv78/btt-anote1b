@@ -32,10 +32,16 @@ export default function HeaderBar() {
             aria-label="Go to leaderboard home"
           >
             <img src="/logo.png" alt="Anote" className="h-7 w-7" />
-            <span className="font-bold text-sm tracking-tight">
-              <span className="text-white">Anote</span>
-              <span className="text-[#28b2fb] ml-1">Leaderboard</span>
-            </span>
+              <a
+              href="https://anote.ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-2 px-3 py-1.5 rounded-lg font-medium  hover:bg-[#28b2fb]/[0.08] transition-all duration-150"
+            >
+                          <span className="font-bold text-white">
+              Anote
+                          </span>
+            </a>
           </button>
 
           {/* Desktop nav */}
@@ -48,21 +54,21 @@ export default function HeaderBar() {
                 className={[
                   "px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150",
                   isActive(item.path)
-                    ? "bg-[#defe47] text-black font-semibold"
-                    : "text-gray-400 hover:text-gray-100 hover:bg-white/[0.06]"
+                    ? "text-[#defe47] font-semibold"
+                    : "text-gray-400 hover:text-gray-100"
                 ].join(' ')}
               >
                 {item.label}
               </button>
             ))}
-            <a
+            {/* <a
               href="https://anote.ai"
               target="_blank"
               rel="noopener noreferrer"
               className="ml-2 px-3 py-1.5 rounded-lg text-sm font-medium text-[#28b2fb] border border-[#28b2fb]/20 hover:bg-[#28b2fb]/[0.08] transition-all duration-150"
             >
               Anote.ai ↗
-            </a>
+            </a> */}
           </nav>
 
           {/* Mobile hamburger */}
@@ -102,14 +108,14 @@ export default function HeaderBar() {
                 {item.label}
               </button>
             ))}
-            <a
+            {/* <a
               href="https://anote.ai"
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-2 rounded-lg text-sm font-medium text-[#28b2fb] hover:bg-[#28b2fb]/[0.08] transition-all"
             >
               Anote.ai ↗
-            </a>
+            </a> */}
           </div>
         )}
       </div>

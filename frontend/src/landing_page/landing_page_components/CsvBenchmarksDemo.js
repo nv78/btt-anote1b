@@ -316,7 +316,7 @@ export default function CsvBenchmarksDemo() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1a] px-4 py-10 text-gray-100">
+    <div className="min-h-screen bg-[#111827] px-4 py-10 text-gray-100">
     <div className="max-w-6xl mx-auto">
       <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Benchmark Runner</div>
       <h1 className="text-3xl sm:text-4xl font-extrabold mb-2 bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">CSV Benchmarks</h1>
@@ -336,7 +336,7 @@ export default function CsvBenchmarksDemo() {
           min={1}
           max={200}
           onChange={e => setSampleSize(e.target.value)}
-          className="border border-gray-700 bg-[#0a0f1a] px-2 py-1 w-24 rounded-md text-white focus:outline-none focus:border-[#defe47]/70"
+          className="border border-gray-700 bg-[#111827] px-2 py-1 w-24 rounded-md text-white focus:outline-none focus:border-[#defe47]/70"
         />
         <label className="ml-4 text-sm flex items-center gap-2">
           <input type="checkbox" checked={echoMode} onChange={e => setEchoMode(e.target.checked)} />
@@ -359,7 +359,7 @@ export default function CsvBenchmarksDemo() {
         <button
           onClick={clearSelection}
           disabled={loading || selectedList.length === 0}
-          className="px-4 py-2 border border-gray-700 text-gray-300 rounded-md hover:bg-[#0a0f1a] disabled:opacity-40"
+          className="px-4 py-2 border border-gray-700 text-gray-300 rounded-md hover:bg-[#111827] disabled:opacity-40"
         >
           Clear
         </button>
@@ -373,7 +373,7 @@ export default function CsvBenchmarksDemo() {
           value={filter}
           onChange={e => setFilter(e.target.value)}
           placeholder="Filter datasets…"
-          className="border border-gray-700 bg-[#0a0f1a] px-2 py-1 text-sm rounded-md text-white w-56 focus:outline-none focus:border-[#defe47]/70"
+          className="border border-gray-700 bg-[#111827] px-2 py-1 text-sm rounded-md text-white w-56 focus:outline-none focus:border-[#defe47]/70"
         />
       </div>
 
@@ -441,7 +441,7 @@ export default function CsvBenchmarksDemo() {
             </thead>
             <tbody>
               {results.runs.map((r) => (
-                <tr key={r.dataset} className="hover:bg-[#0a0f1a]">
+                <tr key={r.dataset} className="hover:bg-[#111827]">
                   <td className="border border-gray-800 px-2 py-1">{r.dataset}</td>
                   <td className="border border-gray-800 px-2 py-1">{r.task_type}</td>
                   <td className="border border-gray-800 px-2 py-1">{r.count}</td>

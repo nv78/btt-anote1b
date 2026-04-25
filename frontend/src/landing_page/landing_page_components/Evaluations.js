@@ -87,7 +87,7 @@ const Evaluations = () => {
   }, [datasets, query]);
 
   return (
-    <section className="bg-[#0a0f1a] min-h-screen py-10 px-4 text-gray-100">
+    <section className="bg-[#111827] min-h-screen py-10 px-4 text-gray-100">
       <div className="text-center mb-8 relative">
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
           <div className="w-80 h-32 rounded-full bg-[#defe47]/[0.03] blur-3xl" />
@@ -101,7 +101,7 @@ const Evaluations = () => {
             Evaluation Leaderboard
           </h1>
 
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-7">
+          {/* <div className="flex flex-wrap items-center justify-center gap-2 mb-7">
             <button
               className="px-5 py-2.5 rounded-lg border border-[#defe47] bg-[#defe47] text-black font-semibold text-sm hover:bg-[#eeff5a] transition-colors active:scale-95 shadow-lg shadow-[#defe47]/10"
               onClick={() => navigate("/")}
@@ -126,7 +126,7 @@ const Evaluations = () => {
             >
               Run Benchmarks
             </button>
-          </div>
+          </div> */}
           <div className="max-w-xl mx-auto">
             <div className="relative">
               <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -523,7 +523,7 @@ const SubmitToLeaderboard = ({
   // };
 
   return (
-    <div className="w-full bg-[#0a0f1a] text-white min-h-screen flex justify-center px-4">
+    <div className="w-full bg-[#111827] text-white min-h-screen flex justify-center px-4">
       <div className="w-full max-w-4xl mx-auto mt-12 mb-20 rounded-2xl bg-[#0d1421] border border-gray-800/80 p-6 md:p-10 space-y-6">
         {/* Header + Close */}
         <div className="flex flex-row items-center justify-between">
@@ -707,7 +707,7 @@ const SubmitToLeaderboard = ({
           Download Example CSV
         </a> */}
         {/* Submit to Leaderboard (API-connected UI) */}
-        <div className="w-full max-w-3xl mx-auto bg-[#0a0f1a]/60 border border-gray-800/60 rounded-xl p-4 md:p-6 mb-8 relative">
+        <div className="w-full max-w-3xl mx-auto bg-[#111827]/60 border border-gray-800/60 rounded-xl p-4 md:p-6 mb-8 relative">
           <button
             aria-label="Close"
             className="absolute right-3 top-3 px-2 py-1 rounded-md border border-gray-700 text-gray-300 hover:border-[#defe47]/60 hover:text-[#defe47]"
@@ -797,6 +797,8 @@ const SubmitToLeaderboard = ({
             >
               Download CSV Template
             </button>
+            </div>
+            <div className="mb-4">
             <div className="text-sm text-gray-300">
               Use these sentences to generate your translations below.
             </div>

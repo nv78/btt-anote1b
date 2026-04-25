@@ -20,7 +20,7 @@ function Footer() {
   ];
 
   return (
-    <footer className="bg-[#060b13] border-t border-white/[0.05]">
+    <footer className="bg-gray-800 border-t border-white/[0.05]">
       <div className="max-w-7xl mx-auto px-6 py-12">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
 
