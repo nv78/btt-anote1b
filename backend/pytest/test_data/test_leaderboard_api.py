@@ -5,7 +5,6 @@ Tests the core leaderboard functionality: submit models, get rankings, get test 
 """
 
 import requests
-import json
 import os
 import pytest
 
@@ -33,7 +32,7 @@ def check_api_available():
         api_url = get_api_base_url()
         response = requests.get(f"{api_url}/health", timeout=5)
         return response.status_code == 200
-    except:
+    except Exception:
         return False
 
 # Skip all tests if API is not available

@@ -1,367 +1,331 @@
 import React, { useState } from "react";
-import {
-  Box,
-  Button,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
-  TextField,
-  Typography,
-  Alert,
-  CircularProgress,
-  Paper,
-  Divider,
-} from "@mui/material";
+import { useNavigate } from "react-router-dom";
+import LeaderboardSDK from "../../lib/leaderboardSdk";
+import { csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 
-const API_BASE =
-  process.env.REACT_APP_API_BASE ||
-  process.env.REACT_APP_API_ENDPOINT ||
-  "http://localhost:5001";
+const emptyForm = {
+  source: "manual",
+  name: "",
+  task_type: "text_classification",
+  evaluation_metric: "accuracy",
+  description: "",
+  url: "",
+  hf_dataset: "",
+  hf_config: "",
+  hf_split: "test",
+  hf_limit: 100,
+};
 
-const TASK_TYPES = [
-  { value: "classification", label: "Classification" },
-  { value: "translation", label: "Translation" },
-  { value: "qa", label: "Q&A" },
-  { value: "ner", label: "NER" },
+const popularDatasets = [
+  { name: "ag_news", task_type: "text_classification", description: "AG News classification" },
+  { name: "imdb", task_type: "text_classification", description: "Movie review sentiment" },
+  { name: "squad", task_type: "document_qa", description: "Extractive QA" },
+  { name: "conll2003", task_type: "named_entity_recognition", description: "Named entity recognition" },
+  { name: "financial_phrasebank", task_type: "text_classification", description: "Financial sentiment" },
 ];
 
-const EVALUATION_METRICS = [
-  { value: "BLEU", label: "BLEU" },
-  { value: "BERTScore", label: "BERTScore" },
-  { value: "F1", label: "F1" },
-  { value: "Accuracy", label: "Accuracy" },
-];
+const emptyRows = [{ source: "", answer: "" }];
 
-const SOURCE_TYPES = [
-  { value: "HuggingFace", label: "HuggingFace" },
-  { value: "HTTP API", label: "HTTP API" },
-  { value: "CSV", label: "CSV" },
-  { value: "Synthetic", label: "Synthetic" },
-];
+const AddDataset = () => {
+  const [form, setForm] = useState(emptyForm);
+  const [rows, setRows] = useState(emptyRows);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
 
-function HuggingFaceSubForm({ values, onChange }) {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-      <TextField
-        label="Dataset ID"
-        placeholder="e.g. facebook/flores"
-        value={values.dataset_id || ""}
-        onChange={(e) => onChange("dataset_id", e.target.value)}
-        fullWidth
-        size="small"
-        required
-      />
-      <TextField
-        label="Config Name"
-        placeholder="e.g. spa_Latn"
-        value={values.config_name || ""}
-        onChange={(e) => onChange("config_name", e.target.value)}
-        fullWidth
-        size="small"
-      />
-      <TextField
-        label="Split"
-        placeholder="e.g. devtest"
-        value={values.split || ""}
-        onChange={(e) => onChange("split", e.target.value)}
-        fullWidth
-        size="small"
-      />
-      <TextField
-        label="Max Samples"
-        type="number"
-        placeholder="e.g. 100"
-        value={values.max_samples || ""}
-        onChange={(e) => onChange("max_samples", e.target.value)}
-        fullWidth
-        size="small"
-        inputProps={{ min: 1 }}
-      />
-    </Box>
-  );
-}
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const updateRow = (index, key, value) => {
+    setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)));
+  };
+  const addRow = () => setRows((current) => [...current, { source: "", answer: "" }]);
+  const removeRow = (index) => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
 
-function HttpApiSubForm({ values, onChange }) {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-      <TextField
-        label="URL"
-        placeholder="https://example.com/api/data"
-        value={values.url || ""}
-        onChange={(e) => onChange("url", e.target.value)}
-        fullWidth
-        size="small"
-        required
-      />
-      <TextField
-        label="Auth Header"
-        placeholder="Bearer <token>"
-        value={values.auth_header || ""}
-        onChange={(e) => onChange("auth_header", e.target.value)}
-        fullWidth
-        size="small"
-      />
-      <TextField
-        label="Input Field"
-        placeholder="Field name for input text"
-        value={values.input_field || ""}
-        onChange={(e) => onChange("input_field", e.target.value)}
-        fullWidth
-        size="small"
-      />
-      <TextField
-        label="Reference Field"
-        placeholder="Field name for reference/ground truth"
-        value={values.reference_field || ""}
-        onChange={(e) => onChange("reference_field", e.target.value)}
-        fullWidth
-        size="small"
-      />
-    </Box>
-  );
-}
-
-export default function AddDataset() {
-  const [name, setName] = useState("");
-  const [taskType, setTaskType] = useState("classification");
-  const [evaluationMetric, setEvaluationMetric] = useState("Accuracy");
-  const [sourceType, setSourceType] = useState("HuggingFace");
-  const [description, setDescription] = useState("");
-  const [sourceConfig, setSourceConfig] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
-
-  function handleSourceConfigChange(key, value) {
-    setSourceConfig((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function handleSourceTypeChange(val) {
-    setSourceType(val);
-    setSourceConfig({});
-    setSuccessMsg("");
-    setErrorMsg("");
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setSuccessMsg("");
-    setErrorMsg("");
-
-    if (!name.trim()) {
-      setErrorMsg("Dataset name is required.");
-      return;
+  const referenceDataFromRows = () => {
+    const cleanRows = rows.filter((row) => row.source.trim() && row.answer.trim());
+    const referenceData = {
+      description: form.description || undefined,
+      url: form.url || undefined,
+      source_texts: cleanRows.map((row) => row.source.trim()),
+    };
+    if (form.task_type === "text_classification") {
+      referenceData.labels = cleanRows.map((row) => row.answer.trim());
+    } else if (form.task_type === "named_entity_recognition") {
+      referenceData.entities = cleanRows.map((row) => row.answer.split(";").map((value) => value.trim()).filter(Boolean));
+    } else if (form.task_type === "translation") {
+      referenceData.reference_translations = cleanRows.map((row) => row.answer.trim());
+    } else {
+      referenceData.answers = cleanRows.map((row) => row.answer.trim());
     }
+    return referenceData;
+  };
 
-    setLoading(true);
-
+  const submit = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    setError("");
     try {
-      let endpoint;
-      let payload;
-
-      if (sourceType === "HuggingFace" || sourceType === "HTTP API") {
-        endpoint = `${API_BASE}/api/datasets/ingest`;
-        payload = {
-          name: name.trim(),
-          task_type: taskType,
-          evaluation_metric: evaluationMetric,
-          source_type: sourceType,
-          description: description.trim(),
-          source_config: sourceConfig,
-        };
+      if (form.source === "huggingface") {
+        const result = await LeaderboardSDK.importHfDataset({
+          dataset_name: form.hf_dataset,
+          config: form.hf_config || undefined,
+          split: form.hf_split,
+          limit: Number(form.hf_limit) || 100,
+          task_type: form.task_type,
+          display_name: form.name || undefined,
+        });
+        setMessage(`Imported ${result.dataset?.name || form.hf_dataset}`);
       } else {
-        // CSV: use add_dataset endpoint
-        endpoint = `${API_BASE}/api/leaderboard/add_dataset`;
-        payload = {
-          name: name.trim(),
-          task_type: taskType,
-          evaluation_metric: evaluationMetric,
-          description: description.trim(),
-        };
+        await LeaderboardSDK.addDatasetPublic({
+          name: form.name,
+          task_type: form.task_type,
+          evaluation_metric: form.evaluation_metric,
+          reference_data: {
+            ...referenceDataFromRows(),
+          },
+        });
+        setMessage(`Created ${form.name}`);
       }
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (res.ok) {
-        setSuccessMsg(
-          data.message ||
-            `Dataset "${name.trim()}" created successfully.`
-        );
-        setName("");
-        setDescription("");
-        setSourceConfig({});
-      } else {
-        setErrorMsg(
-          data.error ||
-            data.message ||
-            `Request failed with status ${res.status}.`
-        );
-      }
+      setForm(emptyForm);
+      setRows(emptyRows);
     } catch (err) {
-      setErrorMsg(err.message || "Network error. Please try again.");
+      setError(err.message || "Failed to create dataset");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
-  }
+  };
 
   return (
-    <Box
-      sx={{
-        maxWidth: 640,
-        mx: "auto",
-        mt: 4,
-        mb: 6,
-        px: { xs: 2, sm: 0 },
-      }}
-    >
-      <Typography variant="h5" fontWeight={700} gutterBottom>
-        Add Dataset
-      </Typography>
-      <Typography variant="body2" color="text.secondary" mb={3}>
-        Register a new benchmark dataset. Choose a source type to configure
-        where the data comes from.
-      </Typography>
+    <section className="bg-[#111827] min-h-screen py-10 px-4 text-gray-100">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
+          <div>
+            <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Dataset Registry</div>
+            <h1 className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">Add Dataset</h1>
+          </div>
+          <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-[#defe47] bg-[#defe47] text-black font-semibold hover:bg-[#28b2fb]"
+            onClick={() => navigate(evaluationsPath)}
+          >
+            View Evaluations
+          </button>
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10"
+            onClick={() => navigate(submittoleaderboardPath)}
+          >
+            Submit Model
+          </button>
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:bg-gray-900"
+            onClick={() => navigate(csvBenchmarksPath)}
+          >
+            Run Benchmarks
+          </button>
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:bg-gray-900"
+            onClick={() => navigate("/")}
+          >
+            Leaderboard
+          </button>
+          </div>
+        </div>
 
-      <Paper variant="outlined" sx={{ p: 3, borderRadius: 2 }}>
-        <Box
-          component="form"
-          onSubmit={handleSubmit}
-          sx={{ display: "flex", flexDirection: "column", gap: 3 }}
-        >
-          {/* Dataset Name */}
-          <TextField
-            label="Dataset Name"
-            placeholder="e.g. my_translation_benchmark"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            fullWidth
-            size="small"
-          />
-
-          {/* Task Type */}
-          <FormControl fullWidth size="small" required>
-            <InputLabel id="task-type-label">Task Type</InputLabel>
-            <Select
-              labelId="task-type-label"
-              value={taskType}
-              label="Task Type"
-              onChange={(e) => setTaskType(e.target.value)}
+        <form onSubmit={submit} className="border border-gray-800 rounded-lg bg-gray-950 p-5 space-y-4">
+          <div>
+            <label className="block text-sm text-gray-300 mb-1">Source</label>
+            <select
+              className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+              value={form.source}
+              onChange={(event) => update("source", event.target.value)}
             >
-              {TASK_TYPES.map((t) => (
-                <MenuItem key={t.value} value={t.value}>
-                  {t.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+              <option value="manual">Manual</option>
+              <option value="huggingface">Hugging Face</option>
+            </select>
+          </div>
 
-          {/* Evaluation Metric */}
-          <FormControl fullWidth size="small" required>
-            <InputLabel id="eval-metric-label">Evaluation Metric</InputLabel>
-            <Select
-              labelId="eval-metric-label"
-              value={evaluationMetric}
-              label="Evaluation Metric"
-              onChange={(e) => setEvaluationMetric(e.target.value)}
-            >
-              {EVALUATION_METRICS.map((m) => (
-                <MenuItem key={m.value} value={m.value}>
-                  {m.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">Display Name</label>
+              <input
+                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                value={form.name}
+                onChange={(event) => update("name", event.target.value)}
+                required={form.source === "manual"}
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">Task Type</label>
+              <select
+                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                value={form.task_type}
+                onChange={(event) => update("task_type", event.target.value)}
+              >
+                <option value="text_classification">Text Classification</option>
+                <option value="translation">Translation</option>
+                <option value="document_qa">Document QA</option>
+                <option value="line_qa">Line QA</option>
+                <option value="named_entity_recognition">Named Entity Recognition</option>
+              </select>
+            </div>
+          </div>
 
-          {/* Source Type */}
-          <FormControl fullWidth size="small" required>
-            <InputLabel id="source-type-label">Source Type</InputLabel>
-            <Select
-              labelId="source-type-label"
-              value={sourceType}
-              label="Source Type"
-              onChange={(e) => handleSourceTypeChange(e.target.value)}
-            >
-              {SOURCE_TYPES.map((s) => (
-                <MenuItem key={s.value} value={s.value}>
-                  {s.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          {/* Dynamic sub-form */}
-          {sourceType !== "CSV" && sourceType !== "Synthetic" && (
+          {form.source === "huggingface" ? (
             <>
-              <Divider />
-              <Typography variant="subtitle2" color="text.secondary">
-                {sourceType} Configuration
-              </Typography>
-              {sourceType === "HuggingFace" && (
-                <HuggingFaceSubForm
-                  values={sourceConfig}
-                  onChange={handleSourceConfigChange}
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Popular Datasets</label>
+                <div className="flex flex-wrap gap-2">
+                  {popularDatasets.map((dataset) => (
+                    <button
+                      key={dataset.name}
+                      type="button"
+                      title={dataset.description}
+                      className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-gray-900"
+                      onClick={() => {
+                        update("hf_dataset", dataset.name);
+                        update("task_type", dataset.task_type);
+                      }}
+                    >
+                      {dataset.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Dataset ID</label>
+                  <input
+                    placeholder="ag_news"
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_dataset}
+                    onChange={(event) => update("hf_dataset", event.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Config</label>
+                  <input
+                    placeholder="optional"
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_config}
+                    onChange={(event) => update("hf_config", event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Split</label>
+                  <input
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_split}
+                    onChange={(event) => update("hf_split", event.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Max Samples</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="5000"
+                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    value={form.hf_limit}
+                    onChange={(event) => update("hf_limit", event.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Evaluation Metric</label>
+                <select
+                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                  value={form.evaluation_metric}
+                  onChange={(event) => update("evaluation_metric", event.target.value)}
+                >
+                  <option value="accuracy">Accuracy</option>
+                  <option value="f1">F1</option>
+                  <option value="bleu">BLEU</option>
+                  <option value="bertscore">BERTScore</option>
+                  <option value="exact">Exact Match</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Dataset URL</label>
+                <input
+                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                  value={form.url}
+                  onChange={(event) => update("url", event.target.value)}
                 />
-              )}
-              {sourceType === "HTTP API" && (
-                <HttpApiSubForm
-                  values={sourceConfig}
-                  onChange={handleSourceConfigChange}
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Description</label>
+                <textarea
+                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                  value={form.description}
+                  onChange={(event) => update("description", event.target.value)}
                 />
-              )}
+              </div>
+              <div className="border border-gray-800 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm text-gray-300">Ground Truth Rows</label>
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-gray-900"
+                    onClick={addRow}
+                  >
+                    Add Row
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {rows.map((row, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+                      <input
+                        placeholder="Question, source text, or document"
+                        className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                        value={row.source}
+                        onChange={(event) => updateRow(index, "source", event.target.value)}
+                      />
+                      <input
+                        placeholder="Label, answer, translation, or entities separated by semicolons"
+                        className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                        value={row.answer}
+                        onChange={(event) => updateRow(index, "answer", event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="px-3 py-2 rounded border border-gray-700 text-gray-400 hover:bg-gray-900"
+                        onClick={() => removeRow(index)}
+                        disabled={rows.length === 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </>
           )}
 
-          {sourceType === "CSV" && (
-            <Alert severity="info">
-              To add a CSV-based dataset, please use the{" "}
-              <strong>CSV Benchmarks</strong> tab to upload your file.
-            </Alert>
-          )}
+          {error ? <div className="text-sm text-red-400">{error}</div> : null}
+          {message ? <div className="text-sm text-green-400">{message}</div> : null}
 
-          {sourceType === "Synthetic" && (
-            <Alert severity="info">
-              Synthetic dataset generation is <strong>coming soon</strong>.
-            </Alert>
-          )}
-
-          {/* Description */}
-          <TextField
-            label="Description (optional)"
-            placeholder="Brief description of this dataset..."
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            fullWidth
-            size="small"
-            multiline
-            minRows={3}
-          />
-
-          {/* Feedback */}
-          {successMsg && <Alert severity="success">{successMsg}</Alert>}
-          {errorMsg && <Alert severity="error">{errorMsg}</Alert>}
-
-          {/* Submit */}
-          <Button
+          <button
             type="submit"
-            variant="contained"
-            disabled={loading || sourceType === "Synthetic"}
-            sx={{ alignSelf: "flex-start", px: 4 }}
+            disabled={submitting}
+            className="px-5 py-2 rounded-md border border-[#defe47] text-[#defe47] hover:bg-[#defe47] hover:text-black disabled:opacity-50"
           >
-            {loading ? (
-              <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
-            ) : null}
-            {loading ? "Submitting…" : "Create Dataset"}
-          </Button>
-        </Box>
-      </Paper>
-    </Box>
+            {submitting ? "Saving..." : "Save Dataset"}
+          </button>
+        </form>
+      </div>
+    </section>
   );
-}
+};
+
+export default AddDataset;

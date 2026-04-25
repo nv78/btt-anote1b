@@ -1,54 +1,23 @@
 import os
-import csv
-import io
 import json
+import csv
 import logging
-import functools
-from datetime import datetime
-from typing import Any, Dict, Optional
-from flask import Flask, request, jsonify, Response
+import re
+from collections import defaultdict, deque
+from datetime import datetime, timezone
+from functools import wraps
+from io import StringIO
+from time import time
+
+from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 import uuid
-
-# ---------------------------
-# Logging configuration
-# ---------------------------
-_LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
-logging.basicConfig(
-    format='%(asctime)s %(levelname)s %(name)s %(message)s',
-    level=getattr(logging, _LOG_LEVEL, logging.INFO),
-)
-logger = logging.getLogger('leaderboard')
 
 # Optional imports for evaluation
 try:
     from nltk.translate.bleu_score import sentence_bleu
 except Exception:
     sentence_bleu = None
-
-# Optional Flask-Limiter
-try:
-    from flask_limiter import Limiter  # type: ignore
-    from flask_limiter.util import get_remote_address  # type: ignore
-    FLASK_LIMITER_AVAILABLE = True
-except ImportError:
-    FLASK_LIMITER_AVAILABLE = False
-    logger.warning(
-        "flask-limiter not installed; rate limiting will be disabled. "
-        "Install with: pip install Flask-Limiter>=3.5.0"
-    )
-
-
-# Optional Flasgger (Swagger UI)
-try:
-    from flasgger import Swagger  # type: ignore
-    FLASGGER_AVAILABLE = True
-except ImportError:
-    FLASGGER_AVAILABLE = False
-    logger.warning(
-        "flasgger not installed; Swagger UI will be disabled. "
-        "Install with: pip install flasgger>=0.9.7"
-    )
 
 # Optional BERTScore
 def _optional_bertscore(predictions, references):
@@ -76,81 +45,125 @@ def get_db_connection():
         return conn, cursor
     except Exception as e:
         # Database might not be configured in local dev. Return None to use in-memory fallback.
-        logger.warning(
-            "Database connection unavailable; using in-memory fallback",
-            extra={"event": "db_connection_failure", "error": str(e)},
-        )
+        logger.warning("db_connection_unavailable", extra={"error": str(e)})
         return None, None
 
 
 app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
-# Allow overriding CORS origins via ALLOWED_ORIGINS env (comma-separated). Defaults to permissive for local dev.
-_origins = os.getenv('ALLOWED_ORIGINS')
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
+logger = logging.getLogger("leaderboard")
+
+# Allow overriding CORS origins via ALLOWED_ORIGINS env (comma-separated).
+_flask_env = os.getenv("FLASK_ENV", "development").lower()
+_origins = os.getenv("ALLOWED_ORIGINS")
 if _origins:
-    _origins_list = [o.strip() for o in _origins.split(',') if o.strip()]
+    _origins_list = [origin.strip() for origin in _origins.split(",") if origin.strip()]
+elif _flask_env == "development":
+    _origins_list = ["http://localhost:3000", "http://127.0.0.1:3000"]
 else:
-    _origins_list = ['*']
+    raise RuntimeError("ALLOWED_ORIGINS must be set outside development")
 CORS(app, resources={r"/*": {"origins": _origins_list}})
 
-# ---------------------------
-# Rate limiting (optional)
-# ---------------------------
-_RATE_LIMIT_DEFAULT = os.getenv('RATE_LIMIT_DEFAULT', '200 per day, 50 per hour')
-_RATE_LIMIT_SUBMIT = os.getenv('RATE_LIMIT_SUBMIT', '10 per minute')
-_RATE_LIMIT_CSV_BENCH = os.getenv('RATE_LIMIT_CSV_BENCH', '5 per minute')
 
-if FLASK_LIMITER_AVAILABLE:
-    limiter = Limiter(
-        get_remote_address,
-        app=app,
-        default_limits=[_RATE_LIMIT_DEFAULT],
-        storage_uri='memory://',
-    )
-else:
-    # Stub limiter with a no-op limit decorator so endpoint code is identical
-    class _NoOpLimiter:
-        def limit(self, *args, **kwargs):
-            def decorator(f):
-                return f
-            return decorator
-    limiter = _NoOpLimiter()
+@app.after_request
+def add_compatible_response_envelope(response):
+    """Add `ok` without removing legacy `success`/`status` fields."""
+    if response.mimetype != "application/json":
+        return response
+    try:
+        payload = response.get_json(silent=True)
+    except Exception:
+        return response
+    if not isinstance(payload, dict) or "ok" in payload:
+        return response
+    if "success" in payload:
+        payload["ok"] = bool(payload["success"])
+    elif payload.get("status") == "success":
+        payload["ok"] = True
+    elif payload.get("status") == "error" or "error" in payload:
+        payload["ok"] = False
+    else:
+        payload["ok"] = 200 <= response.status_code < 400
+    response.set_data(json.dumps(payload))
+    response.content_length = len(response.get_data())
+    return response
 
 
-# ---------------------------
-# Swagger / OpenAPI docs (optional, disabled in production)
-# ---------------------------
-_SWAGGER_ENABLED = (
-    os.getenv('FLASK_ENV', 'development') != 'production'
-    or os.getenv('ENABLE_SWAGGER', '').lower() == 'true'
-)
+def utc_now():
+    return datetime.now(timezone.utc)
 
-if FLASGGER_AVAILABLE and _SWAGGER_ENABLED:
-    _swagger_template = {
-        "swagger": "2.0",
-        "info": {
-            "title": "Anote Model Leaderboard API",
-            "description": (
-                "REST API for submitting model predictions, retrieving benchmark results, "
-                "and managing datasets on the Anote Model Leaderboard."
-            ),
-            "version": "0.1.0",
-            "contact": {"email": "support@anote.ai"},
-            "license": {"name": "MIT"},
-        },
-        "basePath": "/",
-        "schemes": ["http", "https"],
-        "consumes": ["application/json"],
-        "produces": ["application/json"],
-        "tags": [
-            {"name": "general", "description": "Health and info endpoints"},
-            {"name": "leaderboard", "description": "Leaderboard retrieval and export"},
-            {"name": "submissions", "description": "Model submission and evaluation"},
-            {"name": "datasets", "description": "Dataset management"},
-        ],
-    }
-    swagger = Swagger(app, template=_swagger_template)
-    logger.info("Swagger UI enabled at /apidocs")
+
+def validate_text(value, field, max_len=200):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} cannot be empty")
+    value = value.strip()
+    if len(value) > max_len:
+        raise ValueError(f"{field} exceeds {max_len} characters")
+    return value
+
+
+def validate_metadata(value):
+    if value in (None, ""):
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("metadata must be a JSON object")
+    encoded = json.dumps(value)
+    if len(encoded.encode("utf-8")) > 4096:
+        raise ValueError("metadata exceeds 4 KB")
+    return value
+
+
+def require_api_key(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        configured = [key.strip() for key in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if key.strip()]
+        require_key = os.getenv("REQUIRE_API_KEY", "").lower() in {"1", "true", "yes"} or bool(configured)
+        if not require_key:
+            return fn(*args, **kwargs)
+        supplied = request.headers.get("X-API-Key", "")
+        if supplied not in configured:
+            logger.warning("unauthorized_write", extra={"endpoint": request.path, "ip": request.remote_addr})
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+_RATE_WINDOWS = defaultdict(deque)
+
+
+def rate_limit(env_name, default_limit):
+    """Small in-process limiter for write/evaluation endpoints.
+
+    Format: count/minute, for example 10/minute. Set DISABLE_RATE_LIMIT=1 to bypass.
+    """
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if os.getenv("DISABLE_RATE_LIMIT", "").lower() in {"1", "true", "yes"}:
+                return fn(*args, **kwargs)
+            raw_limit = os.getenv(env_name, default_limit)
+            match = re.match(r"^(\d+)/minute$", raw_limit)
+            if not match:
+                return fn(*args, **kwargs)
+            max_calls = int(match.group(1))
+            now = time()
+            key = (request.remote_addr or "unknown", request.path)
+            window = _RATE_WINDOWS[key]
+            while window and now - window[0] > 60:
+                window.popleft()
+            if len(window) >= max_calls:
+                return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+            window.append(now)
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 # Lazy import to avoid import-time failures if files not present
 try:
@@ -158,98 +171,21 @@ try:
 except Exception:
     csv_bench = None
 
+try:
+    from metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+except Exception:
+    try:
+        from backend.metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+    except Exception:
+        METRICS_CATALOG = {}
 
-# ---------------------------
-# API key authentication
-# ---------------------------
-_API_KEYS_RAW = os.getenv('API_KEYS', '')
-if _API_KEYS_RAW.strip():
-    _VALID_API_KEYS = {k.strip() for k in _API_KEYS_RAW.split(',') if k.strip()}
-    logger.info("API key authentication enabled (%d key(s) loaded)", len(_VALID_API_KEYS))
-else:
-    _VALID_API_KEYS = set()
-    logger.warning(
-        "API_KEYS env var not set; write endpoint authentication is DISABLED. "
-        "Set API_KEYS=<comma-separated keys> to enable."
-    )
-
-
-def require_api_key(f):
-    """Decorator that enforces X-API-Key header authentication on write endpoints.
-
-    If API_KEYS env var is not configured, authentication is skipped (open dev mode).
-    Returns 401 JSON when a key is missing or invalid.
-    """
-    @functools.wraps(f)
-    def decorated(*args, **kwargs):
-        if not _VALID_API_KEYS:
-            # Auth disabled — pass through
-            return f(*args, **kwargs)
-        provided_key = request.headers.get('X-API-Key', '')
-        if provided_key not in _VALID_API_KEYS:
-            return jsonify({"ok": False, "error": {"code": "UNAUTHORIZED", "message": "Unauthorized"}}), 401
-        return f(*args, **kwargs)
-    return decorated
-
-
-# ---------------------------
-# Input validation helpers
-# ---------------------------
-def validate_name(value: str, field: str, max_len: int = 200) -> str:
-    """Validate a name/string field.
-
-    Raises ValueError with a descriptive message if the value is empty,
-    whitespace-only, or exceeds max_len characters.
-    Returns the stripped value on success.
-    """
-    if not value or not str(value).strip():
-        raise ValueError(f"'{field}' must not be empty or whitespace-only")
-    stripped = str(value).strip()
-    if len(stripped) > max_len:
-        raise ValueError(f"'{field}' must not exceed {max_len} characters (got {len(stripped)})")
-    return stripped
-
-
-# ---------------------------
-# Standard response helpers
-# ---------------------------
-def success_response(data):
-    """Wrap data in a standard success envelope: {"ok": True, "data": ...}."""
-    return jsonify({"ok": True, "data": data})
-
-
-def error_response(message, code="ERROR", status=400):
-    """Wrap an error in a standard envelope: {"ok": False, "error": {"code": ..., "message": ...}}."""
-    return jsonify({"ok": False, "error": {"code": code, "message": message}}), status
+        def metrics_for_task(_task_type):
+            return {}
 
 
 # Root welcome endpoint for quick sanity check
 @app.get('/')
 def index():
-    """Welcome endpoint — returns API name, version, and available routes.
-    ---
-    tags:
-      - general
-    summary: API info
-    responses:
-      200:
-        description: API information
-        schema:
-          type: object
-          properties:
-            name:
-              type: string
-              example: Anote Leaderboard API
-            version:
-              type: string
-              example: "0.1"
-            endpoints:
-              type: array
-              items:
-                type: string
-            note:
-              type: string
-    """
     return jsonify({
         "name": "Anote Leaderboard API",
         "version": "0.1",
@@ -268,26 +204,7 @@ def index():
 # Simple health endpoint
 @app.get('/health')
 def health():
-    """Health check endpoint.
-    ---
-    tags:
-      - general
-    summary: Health check
-    responses:
-      200:
-        description: Service is healthy
-        schema:
-          type: object
-          properties:
-            ok:
-              type: boolean
-              example: true
-            time:
-              type: string
-              format: date-time
-              example: "2024-01-01T00:00:00"
-    """
-    return jsonify({"ok": True, "time": datetime.utcnow().isoformat()})
+    return jsonify({"ok": True, "time": utc_now().isoformat()})
 
 
 # ---------------------------
@@ -314,11 +231,8 @@ def _get_bleu(translations, references, weights=(0.5, 0.5, 0, 0)):
 _STORE = {
     "submissions": [],  # {id, benchmark_dataset_name, model_name, results, created}
     "evaluations": [],  # {submission_id, score, metric, created}
-    "csv_benchmark_cache": {},  # {cache_key: {result, cached_at}}
+    "datasets": [],  # {name, task_type, evaluation_metric, reference_data}
 }
-
-# CSV benchmark cache TTL in seconds (default 1 hour)
-BENCHMARK_CACHE_TTL = int(os.getenv('BENCHMARK_CACHE_TTL', '3600'))
 
 # UI-oriented datasets store (for add_dataset/add_model endpoints)
 LEADERBOARD_DATA = []  # list of dicts with fields per README
@@ -348,7 +262,7 @@ def get_source_sentences():
         count = int(request.args.get('count', 3))
         start_idx = int(request.args.get('start_idx', 0))
     except ValueError:
-        return error_response("Invalid count or start_idx", code="INVALID_PARAM")
+        return jsonify({"success": False, "error": "Invalid count or start_idx"}), 400
 
     # Try to pull from DB reference_data if available
     pool = None
@@ -369,7 +283,8 @@ def get_source_sentences():
                     pool = None
         finally:
             try:
-                cursor.close(); conn.close()
+                cursor.close()
+                conn.close()
             except Exception:
                 pass
 
@@ -386,7 +301,8 @@ def get_source_sentences():
     selected = pool[start_idx:end_idx]
     sentence_ids = list(range(start_idx, end_idx))
 
-    return success_response({
+    return jsonify({
+        "success": True,
         "dataset_name": dataset_name,
         "sentence_ids": sentence_ids,
         "source_sentences": selected,
@@ -397,121 +313,74 @@ def get_source_sentences():
 @app.get('/public/get_leaderboard')
 def get_leaderboard():
     """Get leaderboard showing model submissions and scores.
-    ---
-    tags:
-      - leaderboard
-    summary: Get ranked leaderboard results
-    description: >
-      Returns paginated model evaluation results ordered by dataset and score.
-      Uses MySQL if configured, otherwise falls back to in-memory store.
-    parameters:
-      - name: page
-        in: query
-        type: integer
-        default: 1
-        description: 1-based page number
-      - name: page_size
-        in: query
-        type: integer
-        default: 25
-        description: Number of results per page (max 100)
-    responses:
-      200:
-        description: Paginated leaderboard entries
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: true
-            results:
-              type: array
-              items:
-                type: object
-                properties:
-                  rank:
-                    type: integer
-                  model_name:
-                    type: string
-                  dataset_name:
-                    type: string
-                  task_type:
-                    type: string
-                  evaluation_metric:
-                    type: string
-                  score:
-                    type: number
-                    format: float
-                  submitted_at:
-                    type: string
-                    format: date-time
-            page:
-              type: integer
-            page_size:
-              type: integer
-            total:
-              type: integer
+    Supports DB if configured, otherwise returns in-memory results.
     """
-    page = max(1, int(request.args.get('page', 1)))
-    page_size = min(100, max(1, int(request.args.get('page_size', 25))))
+    dataset_filter = request.args.get("dataset")
+    page = max(1, int(request.args.get("page", 1)))
+    page_size = min(100, max(1, int(request.args.get("page_size", request.args.get("limit", 25)))))
     offset = (page - 1) * page_size
-
     conn, cursor = get_db_connection()
 
     if conn and cursor:
         try:
-            # Get total count first
+            where = "WHERE bd.active = TRUE"
+            params = []
+            if dataset_filter:
+                where += " AND bd.name = %s"
+                params.append(dataset_filter)
+
             count_query = (
                 "SELECT COUNT(*) AS total "
                 "FROM model_submissions ms "
                 "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
                 "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                "WHERE bd.active = TRUE"
+                f"{where}"
             )
-            cursor.execute(count_query)
-            total = cursor.fetchone()['total']
+            cursor.execute(count_query, tuple(params))
+            total_row = cursor.fetchone() or {}
+            total = int(total_row.get("total", 0))
 
             query = (
                 "SELECT ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
-                "er.score, ms.created AS submitted_at, ms.metadata "
+                "er.score, er.evaluation_details, ms.created AS submitted_at, "
+                "ms.submitted_by, ms.model_results "
                 "FROM model_submissions ms "
                 "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
                 "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                "WHERE bd.active = TRUE "
+                f"{where} "
                 "ORDER BY bd.name, er.score DESC "
                 "LIMIT %s OFFSET %s"
             )
-            cursor.execute(query, (page_size, offset))
+            cursor.execute(query, tuple(params + [page_size, offset]))
             rows = cursor.fetchall()
             leaderboard = []
-            for i, row in enumerate(rows):
-                entry: Dict[str, Any] = {
-                    "rank": offset + i + 1,
+            for i, row in enumerate(rows, start=offset):
+                details = {}
+                if row.get("evaluation_details"):
+                    try:
+                        details = json.loads(row["evaluation_details"]) if isinstance(row["evaluation_details"], str) else row["evaluation_details"]
+                    except Exception:
+                        details = {}
+                leaderboard.append({
+                    "rank": i + 1,
                     "model_name": row['model_name'],
                     "dataset_name": row['dataset_name'],
                     "task_type": row.get('task_type'),
                     "evaluation_metric": row.get('evaluation_metric'),
                     "score": float(row['score']),
+                    "submitted_by": row.get("submitted_by"),
+                    "metadata": details.get("metadata") if isinstance(details, dict) else None,
                     "submitted_at": row['submitted_at'].isoformat() if row.get('submitted_at') else None,
-                }
-                raw_meta = row.get('metadata')
-                if raw_meta is not None:
-                    try:
-                        entry["metadata"] = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
-                    except Exception:
-                        pass
-                leaderboard.append(entry)
-            return success_response({
-                "results": leaderboard,
+                })
+            return jsonify({
+                "success": True,
+                "leaderboard": leaderboard,
                 "page": page,
                 "page_size": page_size,
                 "total": total,
             })
         except Exception as e:
-            logger.error(
-                "Error reading leaderboard from DB",
-                extra={"event": "db_read_failure", "endpoint": "get_leaderboard", "error": str(e)},
-            )
+            logger.exception("leaderboard_db_read_failed", extra={"error": str(e)})
         finally:
             try:
                 cursor.close()
@@ -520,313 +389,75 @@ def get_leaderboard():
                 pass
 
     # In-memory fallback
-    all_entries = sorted(_STORE["evaluations"], key=lambda x: x["score"], reverse=True)
-    total = len(all_entries)
-    page_entries = all_entries[offset: offset + page_size]
-    leaderboard = []
-    for i, ev in enumerate(page_entries):
+    mem_all = []
+    for ev in _STORE["evaluations"]:
         sub = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
         if not sub:
             continue
-        entry: Dict[str, Any] = {
-            "rank": offset + i + 1,
+        if dataset_filter and sub["benchmark_dataset_name"] != dataset_filter:
+            continue
+        mem_all.append((ev, sub))
+    mem_all.sort(key=lambda x: x[0]["score"], reverse=True)
+    total = len(mem_all)
+    mem = mem_all[offset:offset + page_size]
+    leaderboard = []
+    for i, (ev, sub) in enumerate(mem, start=offset):
+        leaderboard.append({
+            "rank": i + 1,
             "model_name": sub["model_name"],
             "dataset_name": sub["benchmark_dataset_name"],
             "task_type": "translation",
             "evaluation_metric": ev["metric"],
             "score": ev["score"],
+            "submitted_by": sub.get("submitted_by"),
+            "metadata": sub.get("metadata"),
             "submitted_at": sub["created"].isoformat(),
-        }
-        if sub.get("metadata") is not None:
-            entry["metadata"] = sub["metadata"]
-        leaderboard.append(entry)
-    return success_response({
-        "results": leaderboard,
+        })
+    return jsonify({
+        "success": True,
+        "leaderboard": leaderboard,
         "page": page,
         "page_size": page_size,
         "total": total,
     })
 
 
-
-@app.get('/public/export/leaderboard')
-def export_leaderboard():
-    """Export leaderboard data as a downloadable CSV or JSON file.
-    ---
-    tags:
-      - leaderboard
-    summary: Export leaderboard data
-    parameters:
-      - name: dataset
-        in: query
-        type: string
-        required: false
-        description: Filter results to a specific dataset name
-      - name: format
-        in: query
-        type: string
-        enum: [json, csv]
-        default: json
-        description: Output format — json or csv
-    produces:
-      - application/json
-      - text/csv
-    responses:
-      200:
-        description: >
-          Leaderboard export file. Content-Type is text/csv or application/json
-          depending on the format parameter. Includes a Content-Disposition header
-          to trigger a browser download.
-      400:
-        description: Invalid format parameter
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: false
-            error:
-              type: string
-    """
-    dataset_filter = request.args.get('dataset', '').strip()
-    fmt = request.args.get('format', 'json').strip().lower()
-    if fmt not in ('csv', 'json'):
-        return error_response("format must be 'csv' or 'json'", code="INVALID_PARAM")
-
-    limit = 10000  # generous cap for export
-    conn, cursor = get_db_connection()
-    leaderboard = []
-
-    if conn and cursor:
-        try:
-            if dataset_filter:
-                query = (
-                    "SELECT ms.model_name, ms.submitted_by, bd.name AS dataset_name, "
-                    "er.score, ms.created AS submitted_at "
-                    "FROM model_submissions ms "
-                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
-                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                    "WHERE bd.active = TRUE AND bd.name = %s "
-                    "ORDER BY er.score DESC "
-                    "LIMIT %s"
-                )
-                cursor.execute(query, (dataset_filter, limit))
-            else:
-                query = (
-                    "SELECT ms.model_name, ms.submitted_by, bd.name AS dataset_name, "
-                    "er.score, ms.created AS submitted_at "
-                    "FROM model_submissions ms "
-                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
-                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                    "WHERE bd.active = TRUE "
-                    "ORDER BY bd.name, er.score DESC "
-                    "LIMIT %s"
-                )
-                cursor.execute(query, (limit,))
-            rows = cursor.fetchall()
-            rank = 1
-            current_dataset = None
-            for row in rows:
-                ds = row['dataset_name']
-                if ds != current_dataset:
-                    rank = 1
-                    current_dataset = ds
-                leaderboard.append({
-                    "rank": rank,
-                    "model_name": row['model_name'],
-                    "submitted_by": row.get('submitted_by') or "",
-                    "score": float(row['score']),
-                    "dataset_name": ds,
-                    "submitted_at": row['submitted_at'].isoformat() if row.get('submitted_at') else "",
-                })
-                rank += 1
-        except Exception as e:
-            logger.error(
-                "Error reading leaderboard for export",
-                extra={"event": "db_read_failure", "endpoint": "export_leaderboard", "error": str(e)},
-            )
-        finally:
-            try:
-                cursor.close()
-                conn.close()
-            except Exception:
-                pass
-
-    if not leaderboard:
-        # In-memory fallback
-        mem = sorted(_STORE["evaluations"], key=lambda x: x["score"], reverse=True)[:limit]
-        for i, ev in enumerate(mem):
-            sub = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
-            if not sub:
-                continue
-            ds = sub["benchmark_dataset_name"]
-            if dataset_filter and ds != dataset_filter:
-                continue
-            leaderboard.append({
-                "rank": i + 1,
-                "model_name": sub["model_name"],
-                "submitted_by": sub.get("submitted_by") or "",
-                "score": ev["score"],
-                "dataset_name": ds,
-                "submitted_at": sub["created"].isoformat(),
-            })
-
-    safe_dataset = dataset_filter.replace('/', '_').replace('\\', '_') if dataset_filter else "all"
-
-    if fmt == 'csv':
-        output = io.StringIO()
-        writer = csv.DictWriter(
-            output,
-            fieldnames=["rank", "model_name", "submitted_by", "score", "submitted_at"],
-            extrasaction='ignore',
-        )
-        writer.writeheader()
-        writer.writerows(leaderboard)
-        csv_bytes = output.getvalue().encode('utf-8')
-        return Response(
-            csv_bytes,
-            mimetype='text/csv',
-            headers={
-                'Content-Disposition': f'attachment; filename=leaderboard-{safe_dataset}.csv',
-                'Content-Length': str(len(csv_bytes)),
-            },
-        )
-
-    # JSON format
-    json_bytes = json.dumps(leaderboard, indent=2, default=str).encode('utf-8')
-    return Response(
-        json_bytes,
-        mimetype='application/json',
-        headers={
-            'Content-Disposition': f'attachment; filename=leaderboard-{safe_dataset}.json',
-            'Content-Length': str(len(json_bytes)),
-        },
-    )
-
-
 @app.post('/public/submit_model')
-@limiter.limit(_RATE_LIMIT_SUBMIT)
+@rate_limit("SUBMIT_MODEL_RATE_LIMIT", "10/minute")
 @require_api_key
 def submit_model():
-    """Submit model predictions to a benchmark dataset and receive an evaluation score.
-    ---
-    tags:
-      - submissions
-    summary: Submit model predictions for evaluation
-    description: >
-      Accepts model predictions alongside sentence IDs, evaluates them against
-      reference data using the appropriate metric (BLEU, BERTScore, accuracy, F1),
-      and persists the result to the leaderboard.
-    parameters:
-      - name: body
-        in: body
-        required: true
-        schema:
-          type: object
-          required:
-            - benchmarkDatasetName
-            - modelName
-            - modelResults
-            - sentence_ids
-          properties:
-            benchmarkDatasetName:
-              type: string
-              example: flores_spanish_translation
-              description: Name of the benchmark dataset to evaluate against
-            modelName:
-              type: string
-              example: my-model-v1
-              description: Display name for this model submission
-            modelResults:
-              type: array
-              items:
-                type: string
-              example: ["Esta es una frase de ejemplo.", "La investigación está en curso."]
-              description: Model predictions, one per sentence_id
-            sentence_ids:
-              type: array
-              items:
-                type: integer
-              example: [0, 1]
-              description: Indices of the source sentences that were translated/answered
-            submittedBy:
-              type: string
-              example: user@example.com
-              description: Optional submitter email
-            metadata:
-              type: object
-              description: Optional extra metadata (max 4096 bytes when JSON-serialised)
-    responses:
-      200:
-        description: Evaluation completed successfully
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: true
-            score:
-              type: number
-              format: float
-              example: 0.42
-      400:
-        description: Validation error (missing fields, length mismatch, etc.)
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: false
-            error:
-              type: string
-      500:
-        description: Evaluation failed
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: false
-            error:
-              type: string
+    """Submit model results to a benchmark dataset and compute evaluation.
+
+    Expected JSON:
+    {
+      "benchmarkDatasetName": "flores_spanish_translation",
+      "modelName": "my-model-v1",
+      "modelResults": ["Traducción 1", ...],
+      "sentence_ids": [0, 1, 2]
+    }
     """
     data = request.get_json(silent=True) or {}
-    benchmark_dataset_name = data.get('benchmarkDatasetName')
-    model_name = data.get('modelName')
+    try:
+        benchmark_dataset_name = validate_text(data.get('benchmarkDatasetName'), "benchmarkDatasetName")
+        model_name = validate_text(data.get('modelName'), "modelName")
+        submitted_by = validate_text(data.get("submittedBy", "public@anote.ai"), "submittedBy", 255)
+        metadata = validate_metadata(data.get("metadata"))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     model_results = data.get('modelResults')
     sentence_ids = data.get('sentence_ids')
-    metadata = data.get('metadata')
 
-    if not all([benchmark_dataset_name, model_name, isinstance(model_results, list), isinstance(sentence_ids, list)]):
-        return error_response(
-            "Missing required fields: benchmarkDatasetName, modelName, modelResults (list), sentence_ids (list)",
-            code="MISSING_FIELDS",
-        )
-
-    # Validate optional metadata field
-    if metadata is not None:
-        if not isinstance(metadata, dict):
-            return error_response("metadata must be a JSON object (dict)", code="INVALID_METADATA")
-        try:
-            metadata_json = json.dumps(metadata)
-        except (TypeError, ValueError) as exc:
-            return error_response(f"metadata is not JSON-serializable: {exc}", code="INVALID_METADATA")
-        if len(metadata_json.encode('utf-8')) > 4096:
-            return error_response("metadata exceeds maximum size of 4096 bytes", code="INVALID_METADATA")
-    else:
-        metadata_json = None
-
-    try:
-        benchmark_dataset_name = validate_name(benchmark_dataset_name, 'benchmarkDatasetName')
-        model_name = validate_name(model_name, 'modelName')
-    except ValueError as exc:
-        return error_response(str(exc), code="INVALID_PARAM")
+    if not all([isinstance(model_results, list), isinstance(sentence_ids, list)]):
+        return jsonify({
+            "success": False,
+            "error": "Missing required fields: benchmarkDatasetName, modelName, modelResults (list), sentence_ids (list)",
+        }), 400
 
     if len(model_results) != len(sentence_ids):
-        return error_response(
-            "Length of sentence_ids must match length of modelResults",
-            code="INVALID_PARAM",
-        )
+        return jsonify({
+            "success": False,
+            "error": "Length of sentence_ids must match length of modelResults",
+        }), 400
 
     # Pull dataset metadata if available
     dataset = None
@@ -840,9 +471,13 @@ def submit_model():
             dataset = cursor_meta.fetchone()
         finally:
             try:
-                cursor_meta.close(); conn_meta.close()
+                cursor_meta.close()
+                conn_meta.close()
             except Exception:
                 pass
+
+    if not dataset:
+        dataset = next((d for d in _STORE["datasets"] if d.get("name") == benchmark_dataset_name), None)
 
     task_type = None
     metric = None
@@ -889,9 +524,11 @@ def submit_model():
 
     def _f1_macro(y_true, y_pred):
         # Simple macro-F1 without external deps
-        from collections import Counter, defaultdict
+        from collections import Counter
         labels = set(map(str, y_true)) | set(map(str, y_pred))
-        tp = Counter(); fp = Counter(); fn = Counter();
+        tp = Counter()
+        fp = Counter()
+        fn = Counter()
         for t, p in zip(map(str, y_true), map(str, y_pred)):
             if t == p:
                 tp[t] += 1
@@ -909,7 +546,6 @@ def submit_model():
     # Helpers for NER (simple entity-string macro-F1)
     def _f1_entities(ref_lists, pred_lists):
         # Each element is a list of strings. Compute micro or macro? We'll do macro over examples.
-        import math
         if not ref_lists or not pred_lists or len(ref_lists) != len(pred_lists):
             return 0.0
         f1s = []
@@ -945,7 +581,7 @@ def submit_model():
         tt = (task_type or '').lower()
         if tt == 'text_classification':
             if not reference_labels:
-                return error_response("Dataset does not have reference labels", code="MISSING_REFERENCE_DATA")
+                return jsonify({"success": False, "error": "Dataset does not have reference labels"}), 400
             metric = (metric or 'accuracy').lower()
             if metric == 'f1':
                 score = _f1_macro(reference_labels, model_results)
@@ -953,16 +589,16 @@ def submit_model():
                 score = _accuracy(reference_labels, model_results)
         elif tt == 'ner':
             if not reference_entities:
-                return error_response("Dataset does not have reference entities", code="MISSING_REFERENCE_DATA")
+                return jsonify({"success": False, "error": "Dataset does not have reference entities"}), 400
             # Parse predicted entities by splitting on ';'
             pred_lists = []
             for out in model_results:
                 parts = [p.strip() for p in str(out).split(';') if p and str(p).strip()]
                 pred_lists.append(parts)
             score = _f1_entities(reference_entities, pred_lists)
-        elif tt in ('chatbot', 'prompting', 'qa'):
+        elif tt in ('chatbot', 'prompting', 'qa', 'document_qa', 'line_qa'):
             if not reference_answers:
-                return error_response("Dataset does not have reference answers", code="MISSING_REFERENCE_DATA")
+                return jsonify({"success": False, "error": "Dataset does not have reference answers"}), 400
             metric = (metric or 'exact').lower()
             vals = []
             for ref, pred in zip(reference_answers, model_results):
@@ -995,32 +631,8 @@ def submit_model():
             else:
                 score = _optional_bertscore(model_results, reference_sentences)
     except Exception as e:
-        logger.exception(
-            "Unhandled exception during evaluation",
-            extra={
-                "event": "evaluation_error",
-                "dataset": benchmark_dataset_name,
-                "model_name": model_name,
-                "error": str(e),
-            },
-        )
-        return error_response("Evaluation failed", code="EVALUATION_ERROR", status=500)
-
-    # Audit log: model submission received and evaluated
-    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-    submitted_by = data.get('submittedBy') or 'public@anote.ai'
-    logger.info(
-        "Model submission evaluated",
-        extra={
-            "event": "model_submission",
-            "dataset": benchmark_dataset_name,
-            "model_name": model_name,
-            "submitted_by": submitted_by,
-            "ip": client_ip,
-            "metric": metric,
-            "score": round(float(score), 6),
-        },
-    )
+        print(f"Evaluation failed: {e}")
+        return jsonify({"success": False, "error": "Evaluation failed"}), 500
 
     # Try to persist in DB; otherwise store in memory
     conn, cursor = get_db_connection()
@@ -1043,40 +655,20 @@ def submit_model():
                 dataset_id = cursor.lastrowid
 
             cursor.execute(
-                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results, metadata) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (dataset_id, model_name, 'public@anote.ai', json.dumps(model_results), metadata_json)
+                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results) "
+                "VALUES (%s, %s, %s, %s)",
+                (dataset_id, model_name, submitted_by, json.dumps(model_results))
             )
             submission_id = cursor.lastrowid
 
             cursor.execute(
                 "INSERT INTO evaluation_results (model_submission_id, score, evaluation_details) "
                 "VALUES (%s, %s, %s)",
-                (submission_id, float(score), json.dumps({"metric": metric}))
+                (submission_id, float(score), json.dumps({"metric": metric, "metadata": metadata}))
             )
             conn.commit()
-            logger.info(
-                "Evaluation result persisted to database",
-                extra={
-                    "event": "evaluation_completion",
-                    "dataset": benchmark_dataset_name,
-                    "model_name": model_name,
-                    "submission_id": submission_id,
-                    "metric": metric,
-                    "score": round(float(score), 6),
-                    "storage": "db",
-                },
-            )
         except Exception as e:
-            logger.error(
-                "DB write failed; falling back to in-memory store",
-                extra={
-                    "event": "db_write_failure",
-                    "dataset": benchmark_dataset_name,
-                    "model_name": model_name,
-                    "error": str(e),
-                },
-            )
+            print(f"DB write failed, storing in memory instead: {e}")
             submission_id = None
         finally:
             try:
@@ -1094,33 +686,23 @@ def submit_model():
             "id": submission_id,
             "benchmark_dataset_name": benchmark_dataset_name,
             "model_name": model_name,
-            "results": model_results,
+            "submitted_by": submitted_by,
             "metadata": metadata,
-            "created": datetime.utcnow(),
+            "results": model_results,
+            "created": utc_now(),
         })
         _STORE["evaluations"].append({
             "submission_id": submission_id,
             "score": float(score),
             "metric": metric,
-            "created": datetime.utcnow(),
+            "created": utc_now(),
         })
-        logger.info(
-            "Evaluation result persisted to in-memory store",
-            extra={
-                "event": "evaluation_completion",
-                "dataset": benchmark_dataset_name,
-                "model_name": model_name,
-                "submission_id": submission_id,
-                "metric": metric,
-                "score": round(float(score), 6),
-                "storage": "memory",
-            },
-        )
 
-    response_data: Dict[str, Any] = {"score": float(score)}
-    if metadata is not None:
-        response_data["metadata"] = metadata
-    return success_response(response_data)
+    logger.info(
+        "model_submitted",
+        extra={"dataset": benchmark_dataset_name, "model": model_name, "score": float(score)},
+    )
+    return jsonify({"success": True, "score": float(score)})
 
 
 # ---------------------------
@@ -1128,41 +710,7 @@ def submit_model():
 # ---------------------------
 @app.get('/public/datasets')
 def list_public_datasets():
-    """List active benchmark datasets with basic metadata.
-    ---
-    tags:
-      - datasets
-    summary: List benchmark datasets
-    responses:
-      200:
-        description: List of active benchmark datasets
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: true
-            datasets:
-              type: array
-              items:
-                type: object
-                properties:
-                  name:
-                    type: string
-                    example: flores_spanish_translation
-                  task_type:
-                    type: string
-                    example: translation
-                  evaluation_metric:
-                    type: string
-                    example: bleu
-                  description:
-                    type: string
-                  url:
-                    type: string
-                  size:
-                    type: integer
-    """
+    """List active benchmark datasets with basic metadata."""
     conn, cursor = get_db_connection()
     if conn and cursor:
         try:
@@ -1191,10 +739,11 @@ def list_public_datasets():
                     "evaluation_metric": r['evaluation_metric'],
                     **extra,
                 })
-            return success_response({"datasets": items})
+            return jsonify({"success": True, "datasets": items})
         finally:
             try:
-                cursor.close(); conn.close()
+                cursor.close()
+                conn.close()
             except Exception:
                 pass
     # Fallback if DB not configured: include curated in-memory datasets too
@@ -1210,10 +759,22 @@ def list_public_datasets():
             "url": ds.get("url"),
             "description": ds.get("description"),
         })
-    return success_response({"datasets": fallback})
+    for ds in _STORE["datasets"]:
+        rd = ds.get("reference_data") if isinstance(ds.get("reference_data"), dict) else {}
+        fallback.append({
+            "name": ds.get("name"),
+            "task_type": ds.get("task_type"),
+            "evaluation_metric": ds.get("evaluation_metric", ""),
+            "url": rd.get("url"),
+            "description": rd.get("description"),
+            "size": len(rd.get("source_texts", [])) if isinstance(rd.get("source_texts"), list) else None,
+        })
+    return jsonify({"success": True, "datasets": fallback})
 
 
 @app.post('/public/add_dataset')
+@rate_limit("ADD_DATASET_RATE_LIMIT", "5/minute")
+@require_api_key
 def add_dataset_public():
     """Create a new benchmark dataset entry.
 
@@ -1226,25 +787,29 @@ def add_dataset_public():
     }
     """
     data = request.get_json(silent=True) or {}
-    name = data.get('name')
-    task_type = data.get('task_type')
-    evaluation_metric = data.get('evaluation_metric')
+    try:
+        name = validate_text(data.get('name'), "name")
+        task_type = validate_text(data.get('task_type'), "task_type", 100)
+        evaluation_metric = validate_text(data.get('evaluation_metric'), "evaluation_metric", 100)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     reference_data = data.get('reference_data') or {}
 
-    if not all([name, task_type, evaluation_metric]):
-        return error_response("Missing required fields: name, task_type, evaluation_metric", code="MISSING_FIELDS")
-
-    try:
-        name = validate_name(name, 'name')
-    except ValueError as exc:
-        return error_response(str(exc), code="INVALID_PARAM")
-
     if not isinstance(reference_data, (dict, list)):
-        return error_response("reference_data must be JSON object or array", code="INVALID_PARAM")
+        return jsonify({"success": False, "error": "reference_data must be JSON object or array"}), 400
 
     conn, cursor = get_db_connection()
     if not (conn and cursor):
         # In-memory: store a shadow dataset in curated data for dev
+        existing = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+        if existing:
+            return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+        _STORE["datasets"].append({
+            "name": name,
+            "task_type": task_type,
+            "evaluation_metric": evaluation_metric,
+            "reference_data": reference_data,
+        })
         LEADERBOARD_DATA.append({
             "id": str(uuid.uuid4()),
             "name": name,
@@ -1253,11 +818,8 @@ def add_dataset_public():
             "url": reference_data.get('url') if isinstance(reference_data, dict) else None,
             "models": [],
         })
-        logger.info(
-            "Dataset created (in-memory)",
-            extra={"event": "dataset_creation", "name": name, "task_type": task_type, "storage": "memory"},
-        )
-        return success_response({"message": "Dataset added (in-memory)"})
+        logger.info("dataset_added_memory", extra={"dataset": name, "task_type": task_type})
+        return jsonify({"success": True, "message": "Dataset added (in-memory)"})
 
     try:
         cursor.execute(
@@ -1265,22 +827,17 @@ def add_dataset_public():
             (name, task_type, evaluation_metric, json.dumps(reference_data))
         )
         conn.commit()
-        logger.info(
-            "Dataset created",
-            extra={"event": "dataset_creation", "name": name, "task_type": task_type, "evaluation_metric": evaluation_metric, "storage": "db"},
-        )
-        return success_response({"message": "Dataset added"})
+        logger.info("dataset_added", extra={"dataset": name, "task_type": task_type})
+        return jsonify({"success": True, "message": "Dataset added"})
     except Exception as e:
         if 'Duplicate' in str(e) or 'UNIQUE' in str(e):
-            return error_response("Dataset with this name already exists", code="DUPLICATE")
-        logger.error(
-            "Failed to add dataset to DB",
-            extra={"event": "db_write_failure", "endpoint": "add_dataset_public", "name": name, "error": str(e)},
-        )
-        return error_response("Failed to add dataset", code="DB_ERROR", status=500)
+            return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+        print(f"add_dataset_public error: {e}")
+        return jsonify({"success": False, "error": "Failed to add dataset"}), 500
     finally:
         try:
-            cursor.close(); conn.close()
+            cursor.close()
+            conn.close()
         except Exception:
             pass
 
@@ -1290,7 +847,7 @@ def dataset_details():
     """Return detailed information about a dataset, including curation meta and top models."""
     name = request.args.get('name')
     if not name:
-        return error_response("Missing name", code="MISSING_FIELDS")
+        return jsonify({"success": False, "error": "Missing name"}), 400
 
     # Try DB first
     conn, cursor = get_db_connection()
@@ -1299,7 +856,7 @@ def dataset_details():
             cursor.execute("SELECT id, name, task_type, evaluation_metric, reference_data, created, active FROM benchmark_datasets WHERE name = %s", (name,))
             ds = cursor.fetchone()
             if not ds:
-                return error_response("Dataset not found", code="NOT_FOUND", status=404)
+                return jsonify({"success": False, "error": "Dataset not found"}), 404
             meta = {}
             examples = []
             count = None
@@ -1329,7 +886,8 @@ def dataset_details():
                     "updated": r['submitted_at'].isoformat() if r.get('submitted_at') else None
                 } for r in rows
             ]
-            return success_response({
+            return jsonify({
+                "success": True,
                 "dataset": {
                     "name": ds['name'],
                     "task_type": ds['task_type'],
@@ -1342,16 +900,29 @@ def dataset_details():
             })
         finally:
             try:
-                cursor.close(); conn.close()
+                cursor.close()
+                conn.close()
             except Exception:
                 pass
 
     # Fallback: find in curated list and memory submissions
     matched = next((d for d in LEADERBOARD_DATA if d.get('name') == name), None)
+    stored = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+    if stored:
+        rd = stored.get("reference_data") if isinstance(stored.get("reference_data"), dict) else {}
+        matched = {
+            "name": stored.get("name"),
+            "task_type": stored.get("task_type"),
+            "evaluation_metric": stored.get("evaluation_metric"),
+            "url": rd.get("url"),
+            "description": rd.get("description"),
+            "size": len(rd.get("source_texts", [])) if isinstance(rd.get("source_texts"), list) else None,
+            "examples": rd.get("source_texts", [])[:5] if isinstance(rd.get("source_texts"), list) else [],
+        }
     if not matched and name.startswith('flores_spanish_translation'):
         matched = {"name": name, "task_type": "translation", "evaluation_metric": "bleu", "description": "FLORES-style demo", "url": None}
     if not matched:
-        return error_response("Dataset not found", code="NOT_FOUND", status=404)
+        return jsonify({"success": False, "error": "Dataset not found"}), 404
     # Gather top models from memory store
     mem = []
     for ev in _STORE['evaluations']:
@@ -1359,8 +930,9 @@ def dataset_details():
         if sub and sub['benchmark_dataset_name'] == name:
             mem.append({"model": sub['model_name'], "score": ev['score'], "updated": sub['created'].isoformat()})
     mem.sort(key=lambda x: x['score'], reverse=True)
-    examples = _SPANISH_REFERENCES[:5]
-    return success_response({
+    examples = matched.get("examples") or _SPANISH_REFERENCES[:5]
+    return jsonify({
+        "success": True,
         "dataset": {
             "name": matched.get('name'),
             "task_type": matched.get('task_type', 'translation'),
@@ -1374,67 +946,245 @@ def dataset_details():
     })
 
 
+@app.get('/api/metrics')
+def list_metrics():
+    """Return metric metadata for UI help text and docs clients."""
+    return jsonify({"success": True, "metrics": METRICS_CATALOG})
+
+
+@app.get('/api/metrics/task/<task_type>')
+def list_task_metrics(task_type):
+    """Return recommended metrics for a specific task type."""
+    return jsonify({"success": True, "task_type": task_type, "metrics": metrics_for_task(task_type)})
+
+
+@app.get('/openapi.json')
+def openapi_spec():
+    """Small OpenAPI document for public integration endpoints."""
+    return jsonify({
+        "openapi": "3.0.3",
+        "info": {"title": "Anote Leaderboard API", "version": "0.2.0"},
+        "paths": {
+            "/public/datasets": {"get": {"summary": "List public datasets"}},
+            "/public/add_dataset": {"post": {"summary": "Create a public dataset"}},
+            "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split"}},
+            "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source"}},
+            "/public/submit_model": {"post": {"summary": "Submit model outputs for evaluation"}},
+            "/public/get_leaderboard": {
+                "get": {
+                    "summary": "Get leaderboard rows",
+                    "parameters": [
+                        {"name": "dataset", "in": "query", "schema": {"type": "string"}},
+                        {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}},
+                        {"name": "page_size", "in": "query", "schema": {"type": "integer", "default": 25}},
+                    ],
+                }
+            },
+            "/public/export/leaderboard": {"get": {"summary": "Export leaderboard rows as CSV or JSON"}},
+            "/api/metrics": {"get": {"summary": "List metric metadata"}},
+            "/api/metrics/task/{task_type}": {"get": {"summary": "List metrics for a task type"}},
+        },
+    })
+
+
+@app.post('/public/import_hf_dataset')
+@rate_limit("IMPORT_DATASET_RATE_LIMIT", "5/minute")
+@require_api_key
+def import_hf_dataset_public():
+    """Import a bounded Hugging Face dataset split into benchmark_datasets/reference_data."""
+    data = request.get_json(silent=True) or {}
+    try:
+        try:
+            from hf_importer import import_hf_dataset  # type: ignore
+        except Exception:
+            from backend.hf_importer import import_hf_dataset  # type: ignore
+        payload = import_hf_dataset(
+            dataset_name=data.get("dataset_name") or data.get("name"),
+            config=data.get("config"),
+            split=data.get("split", "test"),
+            limit=int(data.get("limit", 100)),
+            task_type=data.get("task_type"),
+            display_name=data.get("display_name"),
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    if data.get("preview_only"):
+        preview = dict(payload)
+        rd = dict(preview.get("reference_data") or {})
+        rd["source_texts"] = rd.get("source_texts", [])[:5]
+        rd["ground_truth"] = rd.get("ground_truth", [])[:5]
+        preview["reference_data"] = rd
+        return jsonify({"success": True, "dataset": preview})
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "INSERT INTO benchmark_datasets (name, task_type, evaluation_metric, reference_data, active) VALUES (%s, %s, %s, %s, TRUE)",
+                (
+                    payload["name"],
+                    payload["task_type"],
+                    payload["evaluation_metric"],
+                    json.dumps(payload["reference_data"]),
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            if 'Duplicate' in str(e) or 'UNIQUE' in str(e):
+                return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+            return jsonify({"success": False, "error": "Failed to import dataset"}), 500
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    else:
+        if any(d.get("name") == payload["name"] for d in _STORE["datasets"]):
+            return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
+        _STORE["datasets"].append(payload)
+        LEADERBOARD_DATA.append({
+            "id": str(uuid.uuid4()),
+            "name": payload["name"],
+            "task_type": payload["task_type"],
+            "description": payload["reference_data"].get("description"),
+            "url": payload["reference_data"].get("url"),
+            "models": [],
+        })
+
+    return jsonify({
+        "success": True,
+        "message": "Dataset imported",
+        "dataset": {
+            "name": payload["name"],
+            "task_type": payload["task_type"],
+            "evaluation_metric": payload["evaluation_metric"],
+            "size": len(payload["reference_data"].get("source_texts", [])),
+        },
+    })
+
+
+@app.post('/api/datasets/ingest')
+@rate_limit("IMPORT_DATASET_RATE_LIMIT", "5/minute")
+@require_api_key
+def ingest_dataset():
+    """Issue-compatible ingestion endpoint for Hugging Face sources."""
+    data = request.get_json(silent=True) or {}
+    source = (data.get("source") or "").lower()
+    if source not in {"huggingface", "hf"}:
+        return jsonify({"success": False, "error": "Only source=huggingface is currently supported"}), 400
+    mapped = {
+        "dataset_name": data.get("dataset_id") or data.get("dataset_name"),
+        "config": data.get("config"),
+        "split": data.get("split", "test"),
+        "limit": data.get("max_samples", data.get("limit", 100)),
+        "task_type": data.get("task_type"),
+        "display_name": data.get("display_name"),
+        "preview_only": data.get("preview_only", False),
+    }
+    with app.test_request_context(
+        "/public/import_hf_dataset",
+        method="POST",
+        json=mapped,
+        headers=dict(request.headers),
+    ):
+        return import_hf_dataset_public()
+
+
+@app.get('/public/export/leaderboard')
+def export_leaderboard():
+    """Export leaderboard rows as CSV or JSON."""
+    dataset_name = request.args.get("dataset")
+    export_format = (request.args.get("format") or "csv").lower()
+    with app.test_request_context(
+        "/public/get_leaderboard",
+        query_string={
+            "dataset": dataset_name or "",
+            "page": "1",
+            "page_size": "100",
+        },
+    ):
+        payload = get_leaderboard().get_json()
+    rows = payload.get("leaderboard", []) if payload else []
+    if export_format == "json":
+        return jsonify({"success": True, "leaderboard": rows})
+    if export_format != "csv":
+        return jsonify({"success": False, "error": "format must be csv or json"}), 400
+
+    out = StringIO()
+    writer = csv.DictWriter(
+        out,
+        fieldnames=["rank", "dataset_name", "model_name", "submitted_by", "score", "evaluation_metric", "submitted_at"],
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({field: row.get(field) for field in writer.fieldnames})
+    filename = f"leaderboard-{dataset_name or 'all'}.csv"
+    return Response(
+        out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 # ---------------------------
 # Leaderboard UI API (per README)
 # ---------------------------
 @app.post('/api/leaderboard/add_dataset')
+@rate_limit("ADD_DATASET_RATE_LIMIT", "5/minute")
 @require_api_key
 def add_dataset():
     data = request.get_json(silent=True) or {}
-    required = ["name", "task_type"]
-    missing = [k for k in required if k not in data]
-    if missing:
-        return error_response(f"Missing required fields: {', '.join(missing)}", code="MISSING_FIELDS")
     try:
-        dataset_name_val = validate_name(data["name"], 'name')
-    except ValueError as exc:
-        return error_response(str(exc), code="INVALID_PARAM")
+        name = validate_text(data.get("name"), "name")
+        task_type = validate_text(data.get("task_type"), "task_type", 100)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
     dataset_id = str(uuid.uuid4())
     new_ds = {
         "id": dataset_id,
-        "name": dataset_name_val,
+        "name": name,
         "url": data.get("url"),
-        "task_type": data["task_type"],
+        "task_type": task_type,
         "description": data.get("description"),
         "models": data.get("models", []),
     }
     LEADERBOARD_DATA.append(new_ds)
-    logger.info(
-        "Dataset added to leaderboard (in-memory)",
-        extra={"event": "dataset_creation", "name": dataset_name_val, "task_type": data["task_type"], "dataset_id": dataset_id, "storage": "memory"},
-    )
-    return success_response({
+    return jsonify({
+        "status": "success",
         "message": "Dataset added to leaderboard.",
         "dataset_id": dataset_id,
     })
 
 
 @app.post('/api/leaderboard/add_model')
+@rate_limit("SUBMIT_MODEL_RATE_LIMIT", "10/minute")
 @require_api_key
 def add_model():
     data = request.get_json(silent=True) or {}
-    required = ["dataset_name", "model", "rank", "score", "updated"]
+    required = ["rank", "score", "updated"]
     missing = [k for k in required if k not in data]
     if missing:
-        return error_response(f"Missing required fields: {', '.join(missing)}", code="MISSING_FIELDS")
+        return jsonify({"status": "error", "message": f"Missing required fields: {', '.join(missing)}"}), 400
     try:
-        dataset_name_val = validate_name(data["dataset_name"], 'dataset_name')
-        model_name_val = validate_name(data["model"], 'model')
-    except ValueError as exc:
-        return error_response(str(exc), code="INVALID_PARAM")
+        dataset_name = validate_text(data.get("dataset_name"), "dataset_name")
+        model = validate_text(data.get("model"), "model")
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
     for ds in LEADERBOARD_DATA:
-        if ds.get("name") == dataset_name_val:
+        if ds.get("name") == dataset_name:
             ds.setdefault("models", []).append({
                 "rank": data["rank"],
-                "model": model_name_val,
+                "model": model,
                 "score": data["score"],
                 "ci": data.get("ci"),
                 "updated": data["updated"],
             })
             # keep models sorted by rank
             ds["models"].sort(key=lambda m: (m.get("rank") is None, m.get("rank")))
-            return success_response({"message": "Model added to dataset on leaderboard."})
-    return error_response("Dataset not found.", code="NOT_FOUND", status=404)
+            return jsonify({"status": "success", "message": "Model added to dataset on leaderboard."})
+    return jsonify({"status": "error", "message": "Dataset not found."}), 404
 
 
 @app.get('/api/leaderboard/list')
@@ -1447,157 +1197,10 @@ def list_leaderboard_datasets():
       "datasets": [ { id, name, url, task_type, description, models: [...] }, ... ]
     }
     """
-    return success_response({"datasets": LEADERBOARD_DATA})
-
-
-
-# ---------------------------
-# Dataset ingestion pipeline
-# ---------------------------
-@app.post('/api/datasets/ingest')
-@require_api_key
-def ingest_dataset():
-    """Ingest a dataset from an external source and store it as a benchmark dataset.
-
-    Accepted JSON body:
-
-      source: "huggingface" or "http_api" (required)
-
-      HuggingFace keys: dataset_id, config_name (opt), split (opt, default "test"),
-        max_samples (opt, default 500), input_field, reference_field, task_type (opt)
-
-      HTTP API keys: url, auth_header (opt), input_field, reference_field,
-        max_samples (opt), data_key (opt), task_type (opt)
-
-      Shared optional keys: name (override dataset name), evaluation_metric (default "bleu")
-
-    Returns the created dataset record on success (HTTP 201).
-    """
-    data = request.get_json(silent=True) or {}
-    source = data.get("source", "").strip().lower()
-
-    if source not in ("huggingface", "http_api"):
-        return error_response("Field 'source' must be 'huggingface' or 'http_api'", code="INVALID_PARAM")
-
-    # Lazy import — keeps the ingestion package optional at startup
-    try:
-        if source == "huggingface":
-            from ingestion.huggingface import HuggingFaceIngestor  # type: ignore
-            ingestor = HuggingFaceIngestor()
-        else:
-            from ingestion.http_api import HttpApiIngestor  # type: ignore
-            ingestor = HttpApiIngestor()
-    except ImportError as exc:
-        logger.error(
-            "Ingestion module import failed",
-            extra={"event": "ingest_import_error", "source": source, "error": str(exc)},
-        )
-        return error_response(str(exc), code="MODULE_UNAVAILABLE", status=500)
-
-    try:
-        record = ingestor.ingest(data)
-    except (KeyError, ValueError) as exc:
-        logger.warning(
-            "Ingestion config error",
-            extra={"event": "ingest_config_error", "source": source, "error": str(exc)},
-        )
-        return error_response(str(exc), code="INVALID_PARAM")
-    except Exception as exc:
-        logger.exception(
-            "Ingestion failed",
-            extra={"event": "ingest_error", "source": source, "error": str(exc)},
-        )
-        return error_response(f"Ingestion failed: {exc}", code="INGEST_ERROR", status=500)
-
-    # Build reference_data payload compatible with existing dataset schema
-    source_texts = [s["input"] for s in record.samples]
-    reference_translations = [s["reference"] for s in record.samples]
-    reference_data: Dict[str, Any] = {
-        "source_texts": source_texts,
-        "reference_translations": reference_translations,
-        "url": record.source_url,
-        "description": record.metadata.get("description"),
-        **{k: v for k, v in record.metadata.items() if k != "description"},
-    }
-
-    evaluation_metric = data.get("evaluation_metric", "bleu")
-
-    # Persist to DB if available; otherwise fall back to in-memory store
-    conn, cursor = get_db_connection()
-    dataset_id_val: Optional[str] = None
-    if conn and cursor:
-        try:
-            cursor.execute(
-                "INSERT INTO benchmark_datasets "
-                "(name, task_type, evaluation_metric, reference_data, active) "
-                "VALUES (%s, %s, %s, %s, TRUE)",
-                (record.name, record.task_type, evaluation_metric, json.dumps(reference_data)),
-            )
-            conn.commit()
-            dataset_id_val = str(cursor.lastrowid)
-            logger.info(
-                "Ingested dataset persisted to database",
-                extra={
-                    "event": "ingest_complete",
-                    "name": record.name,
-                    "task_type": record.task_type,
-                    "sample_count": len(record.samples),
-                    "storage": "db",
-                },
-            )
-        except Exception as exc:
-            if "Duplicate" in str(exc) or "UNIQUE" in str(exc):
-                return error_response(f"Dataset '{record.name}' already exists", code="DUPLICATE")
-            logger.error(
-                "DB write failed during ingestion; falling back to in-memory",
-                extra={
-                    "event": "db_write_failure",
-                    "endpoint": "ingest_dataset",
-                    "error": str(exc),
-                },
-            )
-        finally:
-            try:
-                cursor.close()
-                conn.close()
-            except Exception:
-                pass
-
-    if dataset_id_val is None:
-        # In-memory fallback
-        dataset_id_val = str(uuid.uuid4())
-        LEADERBOARD_DATA.append({
-            "id": dataset_id_val,
-            "name": record.name,
-            "task_type": record.task_type,
-            "evaluation_metric": evaluation_metric,
-            "description": record.metadata.get("description"),
-            "url": record.source_url,
-            "models": [],
-        })
-        logger.info(
-            "Ingested dataset persisted to in-memory store",
-            extra={
-                "event": "ingest_complete",
-                "name": record.name,
-                "task_type": record.task_type,
-                "sample_count": len(record.samples),
-                "storage": "memory",
-            },
-        )
-
-    return success_response({
-        "dataset": {
-            "id": dataset_id_val,
-            "name": record.name,
-            "task_type": record.task_type,
-            "split": record.split,
-            "evaluation_metric": evaluation_metric,
-            "sample_count": len(record.samples),
-            "source_url": record.source_url,
-            "metadata": record.metadata,
-        },
-    }), 201
+    return jsonify({
+        "status": "success",
+        "datasets": LEADERBOARD_DATA,
+    })
 
 
 # ---------------------------
@@ -1606,10 +1209,11 @@ def ingest_dataset():
 @app.get('/public/benchmark_csvs')
 def list_benchmark_csvs():
     if not csv_bench:
-        return error_response("CSV benchmark module unavailable", code="MODULE_UNAVAILABLE", status=500)
+        return jsonify({"success": False, "error": "CSV benchmark module unavailable"}), 500
     items = csv_bench.list_csv_datasets()
     # Only return filename and inferred task for brevity
-    return success_response({
+    return jsonify({
+        "success": True,
         "datasets": [
             {"filename": it["filename"], "task_type": it["task_type"], "columns": it.get("columns")}
             for it in items
@@ -1622,17 +1226,14 @@ def list_benchmark_models():
     try:
         import models as _mdl  # type: ignore
         models = _mdl.list_models()
-        return success_response({"models": models})
+        return jsonify({"success": True, "models": models})
     except Exception as e:
-        logger.error(
-            "Failed to retrieve model list",
-            extra={"event": "unhandled_exception", "endpoint": "list_benchmark_models", "error": str(e)},
-        )
-        return error_response("Model list unavailable", code="MODULE_UNAVAILABLE", status=500)
+        print(f"list_benchmark_models error: {e}")
+        return jsonify({"success": False, "error": "Model list unavailable"}), 500
 
 
 @app.post('/public/run_csv_benchmarks')
-@limiter.limit(_RATE_LIMIT_CSV_BENCH)
+@rate_limit("RUN_CSV_RATE_LIMIT", "5/minute")
 @require_api_key
 def run_csv_benchmarks():
     """Run evaluations over CSV datasets using provided model configs.
@@ -1649,7 +1250,7 @@ def run_csv_benchmarks():
       }
     """
     if not csv_bench:
-        return error_response("CSV benchmark module unavailable", code="MODULE_UNAVAILABLE", status=500)
+        return jsonify({"success": False, "error": "CSV benchmark module unavailable"}), 500
     data = request.get_json(silent=True) or {}
     models = data.get('models') or []
     datasets = data.get('datasets')
@@ -1660,69 +1261,13 @@ def run_csv_benchmarks():
             import models as _mdl  # type: ignore
             models = _mdl.list_models()
         except Exception:
-            return error_response("Missing models list", code="MISSING_FIELDS")
-
-    # Check cache for a single dataset + single model request
-    force_refresh = bool(data.get('force_refresh', False))
-    if not force_refresh and datasets and len(datasets) == 1 and len(models) == 1:
-        model_name_key = models[0].get('name') or models[0].get('model') or 'model'
-        cache_key = f"{datasets[0]}:{model_name_key}"
-        cached = _STORE["csv_benchmark_cache"].get(cache_key)
-        if cached:
-            age = (datetime.utcnow() - cached["cached_at"]).total_seconds()
-            if age < BENCHMARK_CACHE_TTL:
-                return success_response({"cached": True, "cached_at": cached["cached_at"].isoformat(), **cached["result"]})
-
+            return jsonify({"success": False, "error": "Missing models list"}), 400
     try:
         summary = csv_bench.run_benchmarks(models=models, datasets=datasets, sample_size=sample_size)
-
-        # Persist each (dataset, model) result to the in-memory cache
-        for run in summary.get("runs", []):
-            dataset_filename = run.get("dataset")
-            for model_key in run.get("results", {}):
-                cache_key = f"{dataset_filename}:{model_key}"
-                _STORE["csv_benchmark_cache"][cache_key] = {
-                    "result": {"runs": [run]},
-                    "cached_at": datetime.utcnow(),
-                }
-
-        return success_response({"cached": False, **summary})
+        return jsonify({"success": True, **summary})
     except Exception as e:
-        logger.exception(
-            "CSV benchmarks run failed",
-            extra={"event": "unhandled_exception", "endpoint": "run_csv_benchmarks", "error": str(e)},
-        )
-        return error_response("Failed to run benchmarks", code="BENCHMARK_ERROR", status=500)
-
-
-@app.get('/public/csv_benchmark_results')
-def get_csv_benchmark_results():
-    """Return cached CSV benchmark results for a given dataset and model.
-
-    Query parameters:
-      dataset  - CSV filename (e.g. ``Commonsense.csv``)
-      model    - model name used in the benchmark run
-    """
-    dataset = request.args.get('dataset', '').strip()
-    model = request.args.get('model', '').strip()
-    if not dataset or not model:
-        return error_response("Both 'dataset' and 'model' query parameters are required", code="MISSING_FIELDS")
-
-    cache_key = f"{dataset}:{model}"
-    cached = _STORE["csv_benchmark_cache"].get(cache_key)
-    if not cached:
-        return error_response("No cached results found for the given dataset and model", code="NOT_FOUND", status=404)
-
-    age = (datetime.utcnow() - cached["cached_at"]).total_seconds()
-    expired = age >= BENCHMARK_CACHE_TTL
-    return success_response({
-        "cached": True,
-        "cached_at": cached["cached_at"].isoformat(),
-        "expired": expired,
-        "ttl_seconds": BENCHMARK_CACHE_TTL,
-        "age_seconds": int(age),
-        **cached["result"],
-    })
+        print(f"CSV benchmarks error: {e}")
+        return jsonify({"success": False, "error": "Failed to run benchmarks"}), 500
 
 
 if __name__ == '__main__':

@@ -1,70 +1,28 @@
 import React from "react";
 
-let ReactGA4;
-try {
-  ReactGA4 = require("react-ga4").default;
-} catch (e) {
-  ReactGA4 = null;
-}
-
 class ErrorBoundary extends React.Component {
-  state = { error: null, hasError: false };
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true, error };
+    return { error };
   }
 
   componentDidCatch(error, info) {
-    console.error("ErrorBoundary caught an error:", error, info);
-
-    if (ReactGA4) {
-      try {
-        ReactGA4.event({
-          category: "Error",
-          action: "Uncaught React Error",
-          label: error && error.message ? error.message : String(error),
-        });
-      } catch (gaError) {
-        console.error("GA4 event failed:", gaError);
-      }
-    }
+    // Keep this local; production telemetry can hook in here later.
+    console.error("App render error", error, info);
   }
 
-  handleReset = () => {
-    this.setState({ error: null, hasError: false });
-  };
-
   render() {
-    if (this.state.hasError) {
+    if (this.state.error) {
       return (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            minHeight: "100vh",
-            fontFamily: "sans-serif",
-            padding: "2rem",
-            textAlign: "center",
-          }}
-        >
-          <h1 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>
-            Something went wrong.
-          </h1>
-          <p style={{ color: "#555", marginBottom: "1.5rem" }}>
-            An unexpected error occurred. Please try again.
-          </p>
+        <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center px-6 text-center">
+          <h1 className="text-2xl font-semibold text-[#EDDC8F]">Something went wrong.</h1>
           <button
-            onClick={this.handleReset}
-            style={{
-              padding: "0.6rem 1.4rem",
-              fontSize: "1rem",
-              cursor: "pointer",
-              borderRadius: "4px",
-              border: "1px solid #ccc",
-              background: "#fff",
-            }}
+            className="mt-4 px-4 py-2 rounded-md border border-gray-700 hover:bg-gray-800"
+            onClick={() => this.setState({ error: null })}
           >
             Try again
           </button>

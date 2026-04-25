@@ -17,6 +17,7 @@ import Leaderboard from "./landing_page_components/Leaderboard";
 import SubmitToLeaderboard  from "./landing_page_components/SubmitToLeaderboard";
 import Evaluations  from "./landing_page_components/Evaluations"
 import AdminLeaderboardManager from "./landing_page_components/AdminLeaderboardManager";
+import AddDataset from "./landing_page_components/AddDataset";
 import DatasetDetails from "./landing_page_components/DatasetDetails";
 import { submittoleaderboardPath, adminLeaderboardPath, evaluationsPath, csvBenchmarksPath, addDatasetPath } from "../constants/RouteConstants";
 import HeaderBar from "./landing_page_components/HeaderBar";
@@ -43,19 +44,21 @@ function LandingPage() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       var path = "lp" + window.location.pathname + window.location.search;
-      window.gtag("event", "page_view", {
-        page_path: path,
-      });
+      if (typeof window.gtag === "function") {
+        window.gtag("event", "page_view", {
+          page_path: path,
+        });
+      }
       if (isLoggedIn) {
         // dispatch(createVisit(path));
       }
     }
-  }, [location]);
+  }, [location, isLoggedIn]);
 
   let robotMetaTag = robotHeader();
 
   return (
-    <div>
+    <div className="bg-[#111827] min-h-screen">
       <Helmet>
         <title>Anote - Model Leaderboard</title>
         {robotMetaTag}

@@ -2,13 +2,12 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install dependencies first (better layer caching)
-COPY package.json package-lock.json* ./
-RUN npm install
+COPY package*.json ./
+RUN npm ci --legacy-peer-deps
 
-# Copy source files
 COPY . .
 
+ENV HOST=0.0.0.0
 EXPOSE 3000
 
 CMD ["npm", "start"]
