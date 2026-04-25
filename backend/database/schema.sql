@@ -197,6 +197,15 @@ CREATE TABLE user_company_chatbots (
 
 
 
+-- API keys table for leaderboard write endpoint authentication
+CREATE TABLE IF NOT EXISTS api_keys (
+  id VARCHAR(36) PRIMARY KEY,
+  key_hash VARCHAR(64) NOT NULL UNIQUE,
+  owner VARCHAR(200) NOT NULL,
+  active BOOLEAN DEFAULT TRUE,
+  created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Leaderboard tables
 CREATE TABLE benchmark_datasets (
     id INTEGER PRIMARY KEY AUTO_INCREMENT,
@@ -214,9 +223,12 @@ CREATE TABLE model_submissions (
     model_name VARCHAR(255) NOT NULL,
     submitted_by VARCHAR(255) NOT NULL,
     model_results LONGTEXT NOT NULL,
+    metadata JSON NULL,
     created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (benchmark_dataset_id) REFERENCES benchmark_datasets(id)
 );
+
+ALTER TABLE model_submissions ADD COLUMN IF NOT EXISTS metadata JSON NULL;
 
 CREATE TABLE evaluation_results (
     id INTEGER PRIMARY KEY AUTO_INCREMENT,

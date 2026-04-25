@@ -21,14 +21,14 @@ export default function HeaderBar() {
   };
 
   return (
-    <div className="sticky top-0 z-50 bg-[#0d1117]/95 backdrop-blur-md border-b border-white/[0.06]">
+    <div className="sticky top-0 z-50 bg-[#080d16]/96 backdrop-blur-lg border-b border-white/[0.05]">
       <div className="max-w-7xl mx-auto px-4">
         <div className="h-14 flex items-center justify-between">
           {/* Logo */}
           <button
             type="button"
             onClick={() => navigate('/')}
-            className="flex items-center gap-2.5 shrink-0 group"
+            className="flex items-center gap-2.5 shrink-0"
             aria-label="Go to leaderboard home"
           >
             <img src="/logo.png" alt="Anote" className="h-7 w-7" />
@@ -39,17 +39,17 @@ export default function HeaderBar() {
           </button>
 
           {/* Desktop nav */}
-          <nav className="hidden sm:flex items-center gap-1">
+          <nav className="hidden sm:flex items-center gap-0.5">
             {navItems.map((item) => (
               <button
                 key={item.path}
                 type="button"
                 onClick={() => navigate(item.path)}
                 className={[
-                  "px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-150",
+                  "px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150",
                   isActive(item.path)
-                    ? "bg-[#defe47] text-black"
-                    : "text-gray-400 hover:text-white hover:bg-white/[0.07]"
+                    ? "bg-[#defe47] text-black font-semibold"
+                    : "text-gray-400 hover:text-gray-100 hover:bg-white/[0.06]"
                 ].join(' ')}
               >
                 {item.label}
@@ -59,7 +59,7 @@ export default function HeaderBar() {
               href="https://anote.ai"
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-2 px-3 py-1.5 rounded-md text-sm font-medium text-[#28b2fb] border border-[#28b2fb]/25 hover:bg-[#28b2fb]/10 transition-all duration-150"
+              className="ml-2 px-3 py-1.5 rounded-lg text-sm font-medium text-[#28b2fb] border border-[#28b2fb]/20 hover:bg-[#28b2fb]/[0.08] transition-all duration-150"
             >
               Anote.ai ↗
             </a>
@@ -68,7 +68,7 @@ export default function HeaderBar() {
           {/* Mobile hamburger */}
           <button
             type="button"
-            className="sm:hidden p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/[0.07] transition-colors"
+            className="sm:hidden p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Toggle navigation"
           >
@@ -86,17 +86,17 @@ export default function HeaderBar() {
 
         {/* Mobile nav dropdown */}
         {mobileOpen && (
-          <div className="sm:hidden pb-3 flex flex-col gap-1 border-t border-white/[0.06] pt-2">
+          <div className="sm:hidden pb-3 flex flex-col gap-0.5 border-t border-white/[0.05] pt-2">
             {navItems.map((item) => (
               <button
                 key={item.path}
                 type="button"
                 onClick={() => { navigate(item.path); setMobileOpen(false); }}
                 className={[
-                  "px-3 py-2 rounded-md text-sm font-medium text-left transition-all",
+                  "px-3 py-2 rounded-lg text-sm font-medium text-left transition-all",
                   isActive(item.path)
-                    ? "bg-[#defe47] text-black"
-                    : "text-gray-400 hover:text-white hover:bg-white/[0.07]"
+                    ? "bg-[#defe47] text-black font-semibold"
+                    : "text-gray-400 hover:text-gray-100 hover:bg-white/[0.06]"
                 ].join(' ')}
               >
                 {item.label}
@@ -106,7 +106,7 @@ export default function HeaderBar() {
               href="https://anote.ai"
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 rounded-md text-sm font-medium text-[#28b2fb] hover:bg-[#28b2fb]/10 transition-all"
+              className="px-3 py-2 rounded-lg text-sm font-medium text-[#28b2fb] hover:bg-[#28b2fb]/[0.08] transition-all"
             >
               Anote.ai ↗
             </a>

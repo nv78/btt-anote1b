@@ -87,87 +87,100 @@ const Evaluations = () => {
   }, [datasets, query]);
 
   return (
-    <section className="bg-[#111827] min-h-screen py-10 px-4 text-gray-100">
-      <div className="text-center mb-6">
-        <div className="text-xs uppercase tracking-[0.2em] text-[#defe47] mb-3">Live Results</div>
-        <h1 className="text-4xl sm:text-5xl font-extrabold bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent mb-4">
-          Evaluation Leaderboard
-        </h1>
-
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
-          <button
-            className="px-6 py-2 rounded-md border border-[#defe47] bg-[#defe47] text-black font-semibold hover:bg-[#28b2fb] transition"
-            onClick={() => navigate("/")}
-          >
-            Main Leaderboard
-          </button>
-          <button
-            className="px-6 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 transition"
-            onClick={() => navigate(submittoleaderboardPath)}
-          >
-            Submit Model
-          </button>
-          <button
-            className="px-6 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 transition"
-            onClick={() => navigate(addDatasetPath)}
-          >
-            Add Dataset
-          </button>
-          <button
-            className="px-6 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 transition"
-            onClick={() => navigate(csvBenchmarksPath)}
-          >
-            Run Benchmarks
-          </button>
+    <section className="bg-[#0a0f1a] min-h-screen py-10 px-4 text-gray-100">
+      <div className="text-center mb-8 relative">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
+          <div className="w-80 h-32 rounded-full bg-[#defe47]/[0.03] blur-3xl" />
         </div>
-        <div className="max-w-xl mx-auto mt-2">
-          <input
-            type="text"
-            placeholder="Search by dataset, model, task, or metric"
-            value={query}
-            onChange={(e)=>setQuery(e.target.value)}
-            className="w-full px-4 py-2 rounded-md bg-gray-950 border border-gray-800 text-gray-200 focus:outline-none focus:border-[#defe47]/70"
-          />
+        <div className="relative">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#defe47]/[0.07] border border-[#defe47]/20 text-xs uppercase tracking-[0.18em] text-[#defe47] mb-4 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#defe47] animate-pulse" />
+            Live Results
+          </div>
+          <h1 className="text-4xl sm:text-5xl font-extrabold bg-gradient-to-r from-[#defe47] via-[#b8f030] to-[#28b2fb] bg-clip-text text-transparent mb-5 leading-tight">
+            Evaluation Leaderboard
+          </h1>
+
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-7">
+            <button
+              className="px-5 py-2.5 rounded-lg border border-[#defe47] bg-[#defe47] text-black font-semibold text-sm hover:bg-[#eeff5a] transition-colors active:scale-95 shadow-lg shadow-[#defe47]/10"
+              onClick={() => navigate("/")}
+            >
+              Main Leaderboard
+            </button>
+            <button
+              className="px-5 py-2.5 rounded-lg border border-gray-700/80 text-gray-300 text-sm font-medium hover:border-[#28b2fb]/50 hover:text-[#28b2fb] transition-colors active:scale-95"
+              onClick={() => navigate(submittoleaderboardPath)}
+            >
+              Submit Model
+            </button>
+            <button
+              className="px-5 py-2.5 rounded-lg border border-gray-700/80 text-gray-300 text-sm font-medium hover:border-[#28b2fb]/50 hover:text-[#28b2fb] transition-colors active:scale-95"
+              onClick={() => navigate(addDatasetPath)}
+            >
+              Add Dataset
+            </button>
+            <button
+              className="px-5 py-2.5 rounded-lg border border-gray-700/80 text-gray-300 text-sm font-medium hover:border-[#28b2fb]/50 hover:text-[#28b2fb] transition-colors active:scale-95"
+              onClick={() => navigate(csvBenchmarksPath)}
+            >
+              Run Benchmarks
+            </button>
+          </div>
+          <div className="max-w-xl mx-auto">
+            <div className="relative">
+              <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search by dataset, model, task, or metric…"
+                value={query}
+                onChange={(e)=>setQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0d1421] border border-gray-800/80 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#28b2fb]/40 transition-colors"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-5">
           {[...Array(4)].map((_,i)=>(
-            <div key={i} className="bg-gray-950 p-6 rounded-lg shadow-md border border-gray-800 animate-pulse">
-              <div className="h-6 bg-gray-800 rounded w-2/3 mb-3" />
-              <div className="h-4 bg-gray-800 rounded w-1/3 mb-6" />
-              {[...Array(3)].map((__,j)=>(<div key={j} className="h-12 bg-gray-800 rounded mb-2" />))}
+            <div key={i} className="bg-[#0d1421] p-6 rounded-2xl border border-gray-800/80 animate-pulse">
+              <div className="h-5 bg-gray-800/80 rounded-lg w-2/3 mb-3" />
+              <div className="h-3.5 bg-gray-800/60 rounded-lg w-1/3 mb-6" />
+              {[...Array(3)].map((__,j)=>(<div key={j} className="h-10 bg-gray-800/50 rounded-lg mb-2" />))}
             </div>
           ))}
         </div>
       ) : (
-      <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-5">
         {filteredDatasets.map((dataset, i) => (
-          <div key={i} className="flex flex-col bg-[#0d1117] rounded-xl shadow-md border border-gray-800 hover:border-[#defe47]/40 transition-colors overflow-hidden">
+          <div key={i} className="flex flex-col bg-[#0d1421] rounded-2xl border border-gray-800/80 hover:border-[#defe47]/25 transition-all duration-200 shadow-xl shadow-black/20 overflow-hidden">
             {/* Card header */}
-            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/70">
+            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/50">
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>{dataset.name}</h2>
                 {(dataset.task_type || dataset.evaluation_metric) && (
-                  <span className="mt-1 inline-block text-xs text-gray-500 font-medium">
+                  <span className="mt-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-800/80 text-[11px] text-gray-400 font-medium border border-gray-700/50">
                     {[dataset.task_type, dataset.evaluation_metric].filter(Boolean).join(' · ')}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
                 {dataset.url && (
                   <a
                     href={dataset.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#defe47] hover:border-[#defe47]/40 transition-colors"
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#defe47] hover:border-[#defe47]/30 transition-colors"
                   >
                     Dataset ↗
                   </a>
                 )}
                 <button
-                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#28b2fb] hover:border-[#28b2fb]/40 transition-colors"
+                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#28b2fb] hover:border-[#28b2fb]/30 transition-colors"
                   onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
                 >
                   Details
@@ -177,13 +190,13 @@ const Evaluations = () => {
 
             {/* Rankings table */}
             <div className="flex-1">
-              <div className="grid grid-cols-[3rem_1fr_6rem] text-[11px] font-semibold uppercase tracking-widest text-gray-500 px-5 py-2.5 border-b border-gray-700/50">
+              <div className="grid grid-cols-[3rem_1fr_6rem] text-[10px] font-semibold uppercase tracking-widest text-gray-600 px-5 py-2.5 border-b border-gray-800/40">
                 <div>Rank</div>
                 <div>Model</div>
                 <div className="text-right">Score</div>
               </div>
-              <div className="divide-y divide-gray-700/25">
-                {dataset.models.slice(0, 5).map((m, mIdx) => {
+              <div className="divide-y divide-gray-800/30">
+                {dataset.models.slice(0, 5).map((m) => {
                   const isTop = m.rank === 1;
                   const score = typeof m.score === 'number' ? m.score.toFixed(3) : m.score;
                   const rankEmoji = m.rank === 1 ? '🥇' : m.rank === 2 ? '🥈' : m.rank === 3 ? '🥉' : null;
@@ -191,25 +204,21 @@ const Evaluations = () => {
                     <div
                       key={m.rank}
                       className={[
-                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-3 text-sm transition-colors",
-                        isTop
-                          ? "bg-[#defe47]/[0.06] hover:bg-[#defe47]/[0.1]"
-                          : mIdx % 2 === 1
-                            ? "bg-white/[0.018] hover:bg-white/[0.045]"
-                            : "hover:bg-white/[0.045]"
+                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-2.5 text-sm transition-colors",
+                        isTop ? "bg-[#defe47]/[0.04] hover:bg-[#defe47]/[0.07]" : "hover:bg-white/[0.03]"
                       ].join(' ')}
                     >
                       <div className="flex items-center gap-1">
                         {rankEmoji
                           ? <span className="mr-0.5">{rankEmoji}</span>
-                          : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-700/50 text-[11px] text-gray-400 tabular-nums font-mono">{m.rank}</span>
+                          : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-800 text-[11px] text-gray-500 tabular-nums font-mono">{m.rank}</span>
                         }
                       </div>
                       <div className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')} title={m.model}>
                         {m.model}
                       </div>
                       <div className="text-right">
-                        <span className={["tabular-nums font-semibold", isTop ? "text-[#defe47]" : m.rank === 2 ? "text-gray-100" : "text-gray-300"].join(' ')}>
+                        <span className={["tabular-nums font-semibold", isTop ? "text-[#defe47]" : m.rank === 2 ? "text-gray-100" : "text-gray-400"].join(' ')}>
                           {score}
                         </span>
                       </div>
@@ -218,10 +227,10 @@ const Evaluations = () => {
                 })}
               </div>
               {dataset.models.length > 5 && (
-                <div className="px-5 py-3 border-t border-gray-700/25 text-center">
+                <div className="px-5 py-3 border-t border-gray-800/30 text-center">
                   <button
                     onClick={() => navigate('/leaderboard', { state: { selectedDataset: dataset.name } })}
-                    className="text-xs text-gray-400 hover:text-[#defe47] transition-colors font-medium"
+                    className="text-xs text-gray-500 hover:text-[#defe47] transition-colors font-medium"
                   >
                     View all {dataset.models.length} models →
                   </button>
@@ -236,12 +245,12 @@ const Evaluations = () => {
 
       <div className="max-w-4xl mx-auto mt-16 flex flex-col items-center">
         {!loading && filteredDatasets.length === 0 && !error && (
-          <div className="mt-6 text-gray-300 bg-gray-950 border border-gray-800 p-4 rounded-md w-full text-center">
+          <div className="mt-6 text-gray-400 bg-[#0d1421] border border-gray-800/80 p-5 rounded-xl w-full text-center text-sm">
             No leaderboard data yet. Add a dataset or submit model outputs to populate this view.
           </div>
         )}
         {error && (
-          <div className="mt-6 text-red-500 bg-red-900 p-4 rounded-md w-full text-center">
+          <div className="mt-6 text-red-400 bg-red-900/20 border border-red-800/40 p-4 rounded-xl w-full text-center text-sm">
             {error}
           </div>
         )}
