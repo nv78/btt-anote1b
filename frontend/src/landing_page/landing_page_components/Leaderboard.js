@@ -1039,73 +1039,74 @@ const Leaderboard = () => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-[#111827] pb-24 px-4 text-gray-100">
+    <div className="flex flex-col items-center justify-start min-h-screen bg-[#0a0f1a] pb-24 px-4 text-gray-100">
 
       {/* ── Hero ── */}
-      <header className="w-full max-w-4xl mt-8 pt-4 text-center">
-        <div className="text-xs uppercase tracking-[0.2em] text-[#28b2fb] mb-3 font-medium">
-          Anote Evaluations
+      <header className="w-full max-w-4xl mt-10 pt-4 text-center relative">
+        {/* Subtle glow behind headline */}
+        <div className="absolute inset-0 -top-10 flex items-center justify-center pointer-events-none">
+          <div className="w-96 h-40 rounded-full bg-[#defe47]/[0.04] blur-3xl" />
         </div>
-        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-[#defe47] to-[#28b2fb] bg-clip-text text-transparent">
-          Model Leaderboard
-        </h1>
-        <p className="mt-4 text-gray-400 text-sm md:text-base max-w-xl mx-auto leading-relaxed">
-          Compare, submit, and create benchmark datasets.
-        </p>
+        <div className="relative">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#28b2fb]/[0.08] border border-[#28b2fb]/20 text-xs uppercase tracking-[0.18em] text-[#28b2fb] mb-4 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#28b2fb] animate-pulse" />
+            Anote Evaluations
+          </div>
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight bg-gradient-to-r from-[#defe47] via-[#b8f030] to-[#28b2fb] bg-clip-text text-transparent leading-tight">
+            Model Leaderboard
+          </h1>
+          <p className="mt-4 text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed">
+            Transparent, community-driven benchmarking. Compare models, submit results, and track performance across diverse datasets.
+          </p>
 
-        {/* Stat pills */}
-        {/* <div className="flex flex-wrap justify-center gap-3 mt-5">
-          {[
-            { label: 'Datasets', value: displayDatasets.length },
-            { label: 'Task types', value: '4+' },
-            { label: 'Open source', value: '✓' },
-          ].map(({ label, value }) => (
-            <span key={label} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.05] border border-white/[0.08] text-xs text-gray-300">
-              <span className="font-semibold text-white">{value}</span>
-              {label}
-            </span>
-          ))}
-        </div> */}
+          {/* Stat pills */}
+          <div className="flex flex-wrap justify-center gap-2.5 mt-6">
+            {[
+              { label: 'Datasets', value: displayDatasets.length || '10+' },
+              { label: 'Task types', value: '4+' },
+              { label: 'Open source', value: '✓' },
+            ].map(({ label, value }) => (
+              <span key={label} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-xs text-gray-300 backdrop-blur-sm">
+                <span className="font-semibold text-white">{value}</span>
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
       </header>
 
       {/* ── CTA buttons ── */}
-      {/* <div className="flex flex-wrap justify-center gap-2 mt-7">
+      <div className="flex flex-wrap justify-center gap-2 mt-7">
         <button
-          className="px-5 py-2 rounded-md text-sm font-semibold transition-all bg-[#defe47] text-black hover:bg-[#f0ff6e] active:scale-95"
+          className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all bg-[#defe47] text-black hover:bg-[#eeff5a] active:scale-95 shadow-lg shadow-[#defe47]/10"
           onClick={() => navigate(evaluationsPath)}
         >
           View Evaluations
         </button>
         <button
-          className="px-5 py-2 rounded-md text-sm font-semibold transition-all border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10 active:scale-95"
+          className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all border border-[#defe47]/50 text-[#defe47] hover:bg-[#defe47]/10 active:scale-95"
           onClick={() => navigate(submittoleaderboardPath)}
         >
           Submit Model
         </button>
-        <div className="hidden sm:block w-px bg-gray-700 mx-1 self-stretch" />
+        <div className="hidden sm:block w-px bg-gray-700/60 mx-1 self-stretch" />
         <button
-          className="px-5 py-2 rounded-md text-sm font-medium transition-all border border-gray-700 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
+          className="px-5 py-2.5 rounded-lg text-sm font-medium transition-all border border-gray-700/80 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
           onClick={() => navigate(addDatasetPath)}
         >
           Add Dataset
         </button>
         <button
-          className="px-5 py-2 rounded-md text-sm font-medium transition-all border border-gray-700 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
+          className="px-5 py-2.5 rounded-lg text-sm font-medium transition-all border border-gray-700/80 text-gray-300 hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95"
           onClick={() => navigate(csvBenchmarksPath)}
         >
           Run Benchmarks
         </button>
-        <button
-          className="px-5 py-2 rounded-md text-sm font-medium transition-all border border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-300 active:scale-95"
-          onClick={() => navigate('/leaderboard/admin')}
-        >
-          Manage
-        </button>
-      </div> */}
+      </div>
 
       {/* ── Loading / error ── */}
       {loading && (
-        <div className="mt-16 text-gray-400 flex items-center gap-2 text-sm">
+        <div className="mt-16 text-gray-400 flex items-center gap-2.5 text-sm">
           <svg className="animate-spin w-4 h-4 text-[#28b2fb]" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
@@ -1114,35 +1115,35 @@ const Leaderboard = () => {
         </div>
       )}
       {error && (
-        <div className="mt-10 text-red-400 text-sm bg-red-900/20 border border-red-800/40 rounded-lg px-4 py-2">
+        <div className="mt-10 text-red-400 text-sm bg-red-900/20 border border-red-800/40 rounded-lg px-4 py-2.5">
           {error}
         </div>
       )}
 
       {/* ── Dataset cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6 mt-8 w-full max-w-7xl">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6 mt-10 w-full max-w-7xl">
         {displayDatasets.map((dataset, index) => (
           <div
             key={index}
-            className="flex flex-col w-full bg-[#0d1117] rounded-xl border border-gray-800 hover:border-[#defe47]/40 transition-colors shadow-lg overflow-hidden"
+            className="flex flex-col w-full bg-[#0d1421] rounded-2xl border border-gray-800/80 hover:border-[#defe47]/30 transition-all duration-200 shadow-xl shadow-black/20 overflow-hidden group"
           >
             {/* Card header */}
-            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/70">
+            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/60">
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>
                   {dataset.name}
                 </h2>
                 {dataset.evaluation_metric && (
-                  <span className="mt-1 inline-block text-xs text-gray-500 font-medium">
+                  <span className="mt-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-800/80 text-[11px] text-gray-400 font-medium border border-gray-700/50">
                     {dataset.evaluation_metric}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
                 {dataset.url && (
                   <a
                     href={dataset.url}
-                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#defe47] hover:border-[#defe47]/40 transition-colors"
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#defe47] hover:border-[#defe47]/30 transition-colors"
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={`Open dataset ${dataset.name}`}
@@ -1151,7 +1152,7 @@ const Leaderboard = () => {
                   </a>
                 )}
                 <button
-                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-[#28b2fb] hover:border-[#28b2fb]/40 transition-colors"
+                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#28b2fb] hover:border-[#28b2fb]/30 transition-colors"
                   onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
                 >
                   Details
@@ -1161,14 +1162,13 @@ const Leaderboard = () => {
 
             {/* Rankings table */}
             <div className="flex-1">
-              {/* Table header — same bg as card, separated by a border only */}
-              <div className="grid grid-cols-[3rem_1fr_6rem] text-[11px] font-semibold uppercase tracking-widest text-gray-500 px-5 py-2.5 border-b border-gray-700/50">
+              <div className="grid grid-cols-[3rem_1fr_6rem] text-[10px] font-semibold uppercase tracking-widest text-gray-600 px-5 py-2.5 border-b border-gray-800/40">
                 <div>Rank</div>
                 <div>Model</div>
                 <div className="text-right">Score</div>
               </div>
 
-              <div className="divide-y divide-gray-700/25">
+              <div className="divide-y divide-gray-800/30">
                 {dataset.models.map((model, modelIndex) => {
                   const isTop = model.rank === 1;
                   const score = typeof model.score === 'number'
@@ -1178,18 +1178,16 @@ const Leaderboard = () => {
                     <div
                       key={modelIndex}
                       className={[
-                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-3 text-sm transition-colors",
+                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-2.5 text-sm transition-colors",
                         isTop
-                          ? "bg-[#defe47]/[0.06] hover:bg-[#defe47]/[0.1]"
-                          : modelIndex % 2 === 1
-                            ? "bg-white/[0.018] hover:bg-white/[0.045]"
-                            : "hover:bg-white/[0.045]"
+                          ? "bg-[#defe47]/[0.04] hover:bg-[#defe47]/[0.08]"
+                          : "hover:bg-white/[0.03]"
                       ].join(' ')}
                     >
-                      <div className="font-semibold text-gray-300 flex items-center gap-1">
+                      <div className="font-semibold text-gray-400 flex items-center gap-1">
                         {rankBadge(model.rank)}
                         {model.rank > 3 && (
-                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-700/50 text-[11px] text-gray-400 tabular-nums font-mono">
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-800 text-[11px] text-gray-500 tabular-nums font-mono">
                             {model.rank}
                           </span>
                         )}
@@ -1203,12 +1201,12 @@ const Leaderboard = () => {
                       <div className="text-right">
                         <span className={[
                           "tabular-nums font-semibold",
-                          isTop ? "text-[#defe47]" : model.rank === 2 ? "text-gray-100" : "text-gray-300"
+                          isTop ? "text-[#defe47]" : model.rank === 2 ? "text-gray-100" : "text-gray-400"
                         ].join(' ')}>
                           {score}
                         </span>
                         {model.ci && (
-                          <div className="text-[10px] text-gray-500 leading-none mt-0.5">{model.ci}</div>
+                          <div className="text-[10px] text-gray-600 leading-none mt-0.5">{model.ci}</div>
                         )}
                       </div>
                     </div>
@@ -1221,32 +1219,36 @@ const Leaderboard = () => {
       </div>
 
       {/* ── FAQs ── */}
-      <div className="w-full max-w-3xl mx-auto mt-20 px-2">
-        <div className="mb-6 text-center">
-          <span className="text-xs uppercase tracking-[0.2em] text-[#28b2fb] font-medium">Help</span>
-          <h2 className="text-2xl md:text-3xl font-bold text-white mt-1">Frequently Asked Questions</h2>
+      <div className="w-full max-w-3xl mx-auto mt-24 px-2">
+        <div className="mb-8 text-center">
+          <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-[0.18em] text-[#28b2fb] font-medium">
+            <span className="w-4 h-px bg-[#28b2fb]/50" />
+            Help
+            <span className="w-4 h-px bg-[#28b2fb]/50" />
+          </span>
+          <h2 className="text-2xl md:text-3xl font-bold text-white mt-2">Frequently Asked Questions</h2>
         </div>
         <div className="space-y-2">
           {faqs.map((faq, index) => (
             <div
               key={index}
-              className="bg-[#0d1117] rounded-xl border border-gray-800 hover:border-gray-700 transition-colors overflow-hidden"
+              className="bg-[#0d1421] rounded-xl border border-gray-800/80 hover:border-gray-700/80 transition-colors overflow-hidden"
             >
               <button
                 className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left cursor-pointer"
                 onClick={() => handleClick(index)}
               >
-                <span className="text-sm md:text-base font-semibold text-white">
+                <span className="text-sm md:text-base font-semibold text-gray-100">
                   {faq.question}
                 </span>
-                <span className={["text-gray-400 transition-transform duration-200 shrink-0", openIndex === index ? "rotate-180" : ""].join(' ')}>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <span className={["text-gray-500 transition-transform duration-200 shrink-0", openIndex === index ? "rotate-180" : ""].join(' ')}>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </span>
               </button>
               {openIndex === index && (
-                <div className="px-5 pb-5 text-sm text-gray-400 leading-relaxed border-t border-gray-800/60 pt-3">
+                <div className="px-5 pb-5 text-sm text-gray-400 leading-relaxed border-t border-gray-800/40 pt-3.5">
                   {faq.answer}
                 </div>
               )}

@@ -97,7 +97,7 @@ const AddDataset = () => {
   };
 
   return (
-    <section className="bg-[#111827] min-h-screen py-10 px-4 text-gray-100">
+    <section className="bg-[#0a0f1a] min-h-screen py-10 px-4 text-gray-100">
       <div className="max-w-4xl mx-auto">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
           <div>
@@ -107,28 +107,28 @@ const AddDataset = () => {
           <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="px-3 py-2 rounded-md border border-[#defe47] bg-[#defe47] text-black font-semibold hover:bg-[#28b2fb]"
+            className="px-4 py-2 rounded-lg border border-[#defe47] bg-[#defe47] text-black text-sm font-semibold hover:bg-[#eeff5a] active:scale-95 transition-all shadow-lg shadow-[#defe47]/10"
             onClick={() => navigate(evaluationsPath)}
           >
             View Evaluations
           </button>
           <button
             type="button"
-            className="px-3 py-2 rounded-md border border-[#defe47]/60 text-[#defe47] hover:bg-[#defe47]/10"
+            className="px-4 py-2 rounded-lg border border-gray-700/80 text-gray-300 text-sm font-medium hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95 transition-all"
             onClick={() => navigate(submittoleaderboardPath)}
           >
             Submit Model
           </button>
           <button
             type="button"
-            className="px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:bg-gray-900"
+            className="px-4 py-2 rounded-lg border border-gray-700/80 text-gray-300 text-sm font-medium hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95 transition-all"
             onClick={() => navigate(csvBenchmarksPath)}
           >
             Run Benchmarks
           </button>
           <button
             type="button"
-            className="px-3 py-2 rounded-md border border-gray-700 text-gray-300 hover:bg-gray-900"
+            className="px-4 py-2 rounded-lg border border-gray-700/80 text-gray-300 text-sm font-medium hover:border-[#28b2fb]/50 hover:text-[#28b2fb] active:scale-95 transition-all"
             onClick={() => navigate("/")}
           >
             Leaderboard
@@ -136,11 +136,11 @@ const AddDataset = () => {
           </div>
         </div>
 
-        <form onSubmit={submit} className="border border-gray-800 rounded-lg bg-gray-950 p-5 space-y-4">
+        <form onSubmit={submit} className="border border-gray-800/80 rounded-2xl bg-[#0d1421] p-5 space-y-4">
           <div>
             <label className="block text-sm text-gray-300 mb-1">Source</label>
             <select
-              className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+              className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
               value={form.source}
               onChange={(event) => update("source", event.target.value)}
             >
@@ -153,7 +153,7 @@ const AddDataset = () => {
             <div>
               <label className="block text-sm text-gray-300 mb-1">Display Name</label>
               <input
-                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                 value={form.name}
                 onChange={(event) => update("name", event.target.value)}
                 required={form.source === "manual"}
@@ -162,7 +162,7 @@ const AddDataset = () => {
             <div>
               <label className="block text-sm text-gray-300 mb-1">Task Type</label>
               <select
-                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                 value={form.task_type}
                 onChange={(event) => update("task_type", event.target.value)}
               >
@@ -185,7 +185,7 @@ const AddDataset = () => {
                       key={dataset.name}
                       type="button"
                       title={dataset.description}
-                      className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-gray-900"
+                      className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-[#0a0f1a]"
                       onClick={() => {
                         update("hf_dataset", dataset.name);
                         update("task_type", dataset.task_type);
@@ -201,7 +201,7 @@ const AddDataset = () => {
                   <label className="block text-sm text-gray-300 mb-1">Dataset ID</label>
                   <input
                     placeholder="ag_news"
-                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                     value={form.hf_dataset}
                     onChange={(event) => update("hf_dataset", event.target.value)}
                     required
@@ -211,7 +211,7 @@ const AddDataset = () => {
                   <label className="block text-sm text-gray-300 mb-1">Config</label>
                   <input
                     placeholder="optional"
-                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                     value={form.hf_config}
                     onChange={(event) => update("hf_config", event.target.value)}
                   />
@@ -219,7 +219,7 @@ const AddDataset = () => {
                 <div>
                   <label className="block text-sm text-gray-300 mb-1">Split</label>
                   <input
-                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                     value={form.hf_split}
                     onChange={(event) => update("hf_split", event.target.value)}
                     required
@@ -231,7 +231,7 @@ const AddDataset = () => {
                     type="number"
                     min="1"
                     max="5000"
-                    className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                    className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                     value={form.hf_limit}
                     onChange={(event) => update("hf_limit", event.target.value)}
                     required
@@ -244,7 +244,7 @@ const AddDataset = () => {
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Evaluation Metric</label>
                 <select
-                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                  className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                   value={form.evaluation_metric}
                   onChange={(event) => update("evaluation_metric", event.target.value)}
                 >
@@ -258,7 +258,7 @@ const AddDataset = () => {
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Dataset URL</label>
                 <input
-                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                  className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                   value={form.url}
                   onChange={(event) => update("url", event.target.value)}
                 />
@@ -266,7 +266,7 @@ const AddDataset = () => {
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Description</label>
                 <textarea
-                  className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                  className="w-full px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                   value={form.description}
                   onChange={(event) => update("description", event.target.value)}
                 />
@@ -276,7 +276,7 @@ const AddDataset = () => {
                   <label className="block text-sm text-gray-300">Ground Truth Rows</label>
                   <button
                     type="button"
-                    className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-gray-900"
+                    className="px-3 py-1 rounded border border-gray-700 text-sm text-gray-300 hover:bg-[#0a0f1a]"
                     onClick={addRow}
                   >
                     Add Row
@@ -287,19 +287,19 @@ const AddDataset = () => {
                     <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
                       <input
                         placeholder="Question, source text, or document"
-                        className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                        className="px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                         value={row.source}
                         onChange={(event) => updateRow(index, "source", event.target.value)}
                       />
                       <input
                         placeholder="Label, answer, translation, or entities separated by semicolons"
-                        className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+                        className="px-3 py-2 rounded-md bg-[#0a0f1a] border border-gray-700 text-white"
                         value={row.answer}
                         onChange={(event) => updateRow(index, "answer", event.target.value)}
                       />
                       <button
                         type="button"
-                        className="px-3 py-2 rounded border border-gray-700 text-gray-400 hover:bg-gray-900"
+                        className="px-3 py-2 rounded border border-gray-700 text-gray-400 hover:bg-[#0a0f1a]"
                         onClick={() => removeRow(index)}
                         disabled={rows.length === 1}
                       >
