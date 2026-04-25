@@ -4,6 +4,7 @@ Flask-Limiter>=3.5.0
 requests>=2.31
 nltk>=3.8
 flasgger>=0.9.7
+pytest>=7.0
 # Optional deps (not required for demo):
 # bert-score>=0.3
 # mysql-connector-python>=8.0
