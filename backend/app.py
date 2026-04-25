@@ -144,7 +144,7 @@ def rate_limit(env_name, default_limit):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if app.testing or os.getenv("DISABLE_RATE_LIMIT", "").lower() in {"1", "true", "yes"}:
+            if os.getenv("DISABLE_RATE_LIMIT", "").lower() in {"1", "true", "yes"}:
                 return fn(*args, **kwargs)
             raw_limit = os.getenv(env_name, default_limit)
             match = re.match(r"^(\d+)/minute$", raw_limit)
