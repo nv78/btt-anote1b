@@ -13,7 +13,9 @@ const MySubmissions = () => {
   const [submitterId, setSubmitterId] = useState(() => localStorage.getItem("leaderboard_submitter_id") || "");
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
+  const [nextCursor, setNextCursor] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -26,6 +28,7 @@ const MySubmissions = () => {
   const load = async () => {
     setLoading(true);
     setError("");
+    setNextCursor(null);
     try {
       const jwt = getLeaderboardJwt();
       if (!submitterId.trim() && !jwt) {
@@ -35,7 +38,7 @@ const MySubmissions = () => {
         setLoading(false);
         return;
       }
-      const qs = new URLSearchParams({ page: "1", page_size: "50" });
+      const qs = new URLSearchParams({ page_size: "50" });
       if (submitterId.trim()) qs.set("submitter_id", submitterId.trim());
       const headers = {};
       if (apiKey.trim()) headers["X-API-Key"] = apiKey.trim();
@@ -47,11 +50,38 @@ const MySubmissions = () => {
       }
       setRows(data.submissions || []);
       setTotal(data.total || 0);
+      setNextCursor(data.next_cursor || null);
     } catch (e) {
       setError(e.message || "Error");
       setRows([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const jwt = getLeaderboardJwt();
+      const qs = new URLSearchParams({ page_size: "50", cursor: nextCursor });
+      if (submitterId.trim()) qs.set("submitter_id", submitterId.trim());
+      const headers = {};
+      if (apiKey.trim()) headers["X-API-Key"] = apiKey.trim();
+      if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
+      const res = await fetch(`${API_BASE}/public/my_submissions?${qs}`, { headers });
+      const data = await res.json();
+      if (!res.ok || data.success !== true) {
+        throw new Error(data.error || "Failed to load more");
+      }
+      const chunk = data.submissions || [];
+      setRows((prev) => [...prev, ...chunk]);
+      setNextCursor(data.next_cursor || null);
+    } catch (e) {
+      setError(e.message || "Error");
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -107,9 +137,9 @@ const MySubmissions = () => {
           <div className="text-sm text-gray-500 mb-2">Total: {total}</div>
         )}
         <div className="space-y-2">
-          {rows.map((r) => (
+          {rows.map((r, idx) => (
             <div
-              key={r.submission_id}
+              key={`${r.submission_id}-${idx}`}
               className="bg-[#0d1421] border border-gray-800 rounded-lg p-4 flex flex-col gap-1"
             >
               <div className="flex flex-wrap justify-between gap-2">
@@ -125,6 +155,18 @@ const MySubmissions = () => {
             </div>
           ))}
         </div>
+        {nextCursor && !loading && (
+          <div className="mt-6 flex justify-center">
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="px-4 py-2 rounded-lg border border-[#defe47]/50 text-[#defe47] text-sm font-semibold hover:bg-[#defe47]/10 disabled:opacity-50"
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

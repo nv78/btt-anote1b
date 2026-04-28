@@ -1,49 +1,64 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 import { useNavigate } from "react-router-dom";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 
+function groupLeaderboardEntries(entries) {
+  if (!Array.isArray(entries) || !entries.length) return [];
+  const grouped = entries.reduce((acc, e) => {
+    const key = e.dataset_name || "Unknown Dataset";
+    if (!acc[key]) {
+      acc[key] = { name: key, evaluation_metric: e.evaluation_metric, task_type: e.task_type, models: [] };
+    } else if (e.task_type && !acc[key].task_type) {
+      acc[key].task_type = e.task_type;
+    }
+    acc[key].models.push({
+      model: e.model_name,
+      score: typeof e.score === "number" ? e.score : Number(e.score) || 0,
+      updated: e.submitted_at ? new Date(e.submitted_at).toLocaleDateString() : "",
+      primary_metric: e.primary_metric,
+      detailed_scores: e.detailed_scores,
+    });
+    return acc;
+  }, {});
+  return Object.values(grouped).map((d) => {
+    const next = { ...d, models: [...d.models] };
+    next.models.sort((a, b) => b.score - a.score);
+    next.models = next.models.map((m, i) => ({ rank: i + 1, ...m }));
+    return next;
+  });
+}
+
 const Leaderboard = () => {
   const [openIndex, setOpenIndex] = useState(null);
-  const [liveDatasets, setLiveDatasets] = useState([]);
+  const [liveEntries, setLiveEntries] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [curatedDatasets, setCuratedDatasets] = useState([]);
   const [viewMode, setViewMode] = useState('live'); // 'live' | 'curated'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
 
+  const liveDatasets = useMemo(() => groupLeaderboardEntries(liveEntries), [liveEntries]);
+
   useEffect(() => {
     let ignore = false;
     const run = async () => {
       setLoading(true);
       setError("");
+      setNextCursor(null);
       try {
-        const res = await fetch(`${API_BASE}/public/get_leaderboard`);
+        const url = new URL(`${API_BASE}/public/get_leaderboard`);
+        url.searchParams.set("page_size", "40");
+        const res = await fetch(url.toString());
         const data = await res.json();
         if (!res.ok || data.success !== true) throw new Error(data.error || "Failed to load leaderboard");
         const entries = Array.isArray(data.leaderboard) ? data.leaderboard : [];
-        const grouped = entries.reduce((acc, e) => {
-          const key = e.dataset_name || "Unknown Dataset";
-          if (!acc[key]) {
-            acc[key] = { name: key, evaluation_metric: e.evaluation_metric, task_type: e.task_type, models: [] };
-          } else if (e.task_type && !acc[key].task_type) {
-            acc[key].task_type = e.task_type;
-          }
-          acc[key].models.push({
-            model: e.model_name,
-            score: typeof e.score === 'number' ? e.score : Number(e.score) || 0,
-            updated: e.submitted_at ? new Date(e.submitted_at).toLocaleDateString() : "",
-            primary_metric: e.primary_metric,
-            detailed_scores: e.detailed_scores,
-          });
-          return acc;
-        }, {});
-        const groupedArr = Object.values(grouped).map((d) => {
-          d.models.sort((a, b) => b.score - a.score);
-          d.models = d.models.map((m, i) => ({ rank: i + 1, ...m }));
-          return d;
-        });
-        if (!ignore) setLiveDatasets(groupedArr);
+        if (!ignore) {
+          setLiveEntries(entries);
+          setNextCursor(data.next_cursor || null);
+        }
       } catch (e) {
         if (!ignore) setError(e.message || "Error loading leaderboard");
       } finally {
@@ -53,6 +68,27 @@ const Leaderboard = () => {
     run();
     return () => { ignore = true; };
   }, [API_BASE]);
+
+  const loadMoreLive = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const url = new URL(`${API_BASE}/public/get_leaderboard`);
+      url.searchParams.set("page_size", "40");
+      url.searchParams.set("cursor", nextCursor);
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      if (!res.ok || data.success !== true) throw new Error(data.error || "Failed to load more");
+      const chunk = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+      setLiveEntries((prev) => [...prev, ...chunk]);
+      setNextCursor(data.next_cursor || null);
+    } catch (e) {
+      setError(e.message || "Error loading more");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -1089,7 +1125,7 @@ const Leaderboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6 mt-10 w-full max-w-7xl">
         {displayDatasets.map((dataset, index) => (
           <div
-            key={index}
+            key={dataset.name || index}
             className="flex flex-col w-full bg-[#0d1421] rounded-2xl border border-gray-800/80 hover:border-[#defe47]/30 transition-all duration-200 shadow-xl shadow-black/20 overflow-hidden group"
           >
             {/* Card header */}
@@ -1196,6 +1232,20 @@ const Leaderboard = () => {
           </div>
         ))}
       </div>
+
+      {viewMode === "live" && nextCursor && !loading && (
+        <div className="mt-10 flex flex-col items-center gap-2 w-full max-w-7xl">
+          <button
+            type="button"
+            onClick={loadMoreLive}
+            disabled={loadingMore}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-[#defe47]/50 text-[#defe47] hover:bg-[#defe47]/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {loadingMore ? "Loading…" : "Load more results"}
+          </button>
+          <p className="text-xs text-gray-500">Uses keyset pagination from the API.</p>
+        </div>
+      )}
 
       {/* ── FAQs ── */}
       <div className="w-full max-w-3xl mx-auto mt-24 px-2">

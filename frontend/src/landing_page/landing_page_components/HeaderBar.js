@@ -1,19 +1,42 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from '../../constants/RouteConstants';
+import {
+  addDatasetPath,
+  csvBenchmarksPath,
+  evaluationsPath,
+  loginPath,
+  mySubmissionsPath,
+  submittoleaderboardPath,
+} from '../../constants/RouteConstants';
+import { canAccessContributorRoutes, clearLeaderboardJwt, getLeaderboardJwt } from '../../utils/leaderboardAuth';
 
 export default function HeaderBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [authRev, setAuthRev] = useState(0);
+
+  useEffect(() => {
+    setAuthRev((r) => r + 1);
+  }, [location.pathname]);
 
   const navItems = [
     { label: 'Leaderboard', path: '/' },
     { label: 'Evaluations', path: evaluationsPath },
     { label: 'Submit', path: submittoleaderboardPath },
+    { label: 'My submissions', path: mySubmissionsPath },
     { label: 'Add Dataset', path: addDatasetPath },
     { label: 'Benchmarks', path: csvBenchmarksPath },
   ];
+
+  const signedInWithJwt = authRev >= 0 && !!getLeaderboardJwt();
+  const canPassContributorGate = authRev >= 0 && canAccessContributorRoutes();
+
+  const onSignOut = () => {
+    clearLeaderboardJwt();
+    setAuthRev((r) => r + 1);
+    navigate('/');
+  };
 
   const isActive = (path) => {
     if (path === '/') return location.pathname === '/' || location.pathname === '';
@@ -61,6 +84,25 @@ export default function HeaderBar() {
                 {item.label}
               </button>
             ))}
+            {canPassContributorGate ? (
+              signedInWithJwt ? (
+                <button
+                  type="button"
+                  onClick={onSignOut}
+                  className="ml-1 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/[0.06] transition-all"
+                >
+                  Sign out
+                </button>
+              ) : null
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate(loginPath)}
+                className="ml-1 px-3 py-1.5 rounded-lg text-sm font-medium text-[#defe47] border border-[#defe47]/40 hover:bg-[#defe47]/10 transition-all"
+              >
+                Log in
+              </button>
+            )}
             {/* <a
               href="https://anote.ai"
               target="_blank"
@@ -108,6 +150,25 @@ export default function HeaderBar() {
                 {item.label}
               </button>
             ))}
+            {canPassContributorGate ? (
+              signedInWithJwt ? (
+                <button
+                  type="button"
+                  onClick={() => { onSignOut(); setMobileOpen(false); }}
+                  className="px-3 py-2 rounded-lg text-sm font-medium text-left text-gray-400 hover:text-white hover:bg-white/[0.06]"
+                >
+                  Sign out
+                </button>
+              ) : null
+            ) : (
+              <button
+                type="button"
+                onClick={() => { navigate(loginPath); setMobileOpen(false); }}
+                className="px-3 py-2 rounded-lg text-sm font-medium text-left bg-[#defe47]/10 text-[#defe47] border border-[#defe47]/30"
+              >
+                Log in
+              </button>
+            )}
             {/* <a
               href="https://anote.ai"
               target="_blank"

@@ -11,7 +11,7 @@ Usage:
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import requests
 
@@ -250,11 +250,18 @@ class LeaderboardClient:
         payload: Dict[str, Any] = {"dataset_name": dataset_name, "split": split, "limit": limit, **kwargs}
         return self._request("POST", "/public/import_hf_dataset", json=payload)
 
-    def export_leaderboard(self, dataset: Optional[str] = None, format: str = "json") -> Dict[str, Any]:
+    def export_leaderboard(
+        self, dataset: Optional[str] = None, format: str = "json"
+    ) -> Union[List[Dict[str, Any]], str]:
         params: Dict[str, Any] = {"format": format}
         if dataset:
             params["dataset"] = dataset
-        return self._request("GET", "/public/export/leaderboard", params=params)
+        url = f"{self.base_url}/public/export/leaderboard"
+        r = requests.get(url, params=params, headers=self._headers(), timeout=self.timeout)
+        r.raise_for_status()
+        if format.lower() == "csv":
+            return r.text
+        return r.json()
 
     def list_benchmark_csvs(self) -> Dict[str, Any]:
         return self._request("GET", "/public/benchmark_csvs")
