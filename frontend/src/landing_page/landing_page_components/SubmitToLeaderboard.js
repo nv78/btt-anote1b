@@ -15,6 +15,7 @@ import {
   NLPTaskFileName,
   FlowTypeFileName,
 } from "../../constants/DbEnums";
+import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 
 // Simple API base for dev
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
@@ -64,6 +65,42 @@ const SubmitToLeaderboard = ({
     { value: "flores_spanish_translation_bertscore", label: "Spanish (BERTScore)", task_type: 'translation', evaluation_metric: 'bertscore', size: undefined },
   ]);
   const [selectedDatasetMeta, setSelectedDatasetMeta] = useState({ task_type: 'translation', evaluation_metric: 'bleu', size: undefined });
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("leaderboard_api_key") || "");
+  const [submitterId, setSubmitterId] = useState(() => localStorage.getItem("leaderboard_submitter_id") || "");
+  const [submissionFormat, setSubmissionFormat] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem("leaderboard_api_key", apiKey);
+  }, [apiKey]);
+  useEffect(() => {
+    localStorage.setItem("leaderboard_submitter_id", submitterId);
+  }, [submitterId]);
+
+  const buildHeaders = (json = true) => {
+    const h = {};
+    if (json) h["Content-Type"] = "application/json";
+    if (apiKey.trim()) h["X-API-Key"] = apiKey.trim();
+    return h;
+  };
+
+  const loadSubmissionFormat = async (name) => {
+    try {
+      const enc = encodeURIComponent(name);
+      const res = await fetch(`${API_BASE}/public/submission_format?dataset=${enc}`);
+      const data = await res.json();
+      if (res.ok && data.task_type_normalized) {
+        setSubmissionFormat(data);
+      } else {
+        setSubmissionFormat(null);
+      }
+    } catch {
+      setSubmissionFormat(null);
+    }
+  };
+
+  useEffect(() => {
+    if (datasetKey) loadSubmissionFormat(datasetKey);
+  }, [datasetKey]);
 
   // Load available datasets from backend
   useEffect(() => {
@@ -124,16 +161,43 @@ const SubmitToLeaderboard = ({
         modelResults: translations,
         sentence_ids: sentenceIds,
       };
+      if (submitterId.trim()) payload.submitterId = submitterId.trim();
       const res = await fetch(`${API_BASE}/public/submit_model`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      if (res.status === 202 && data.job_id) {
+        let polled = data;
+        for (let i = 0; i < 120; i++) {
+          await new Promise((r) => setTimeout(r, 400));
+          const pr = await fetch(`${API_BASE}/public/eval_jobs/${data.job_id}`);
+          polled = await pr.json();
+          if (polled.status === "completed" && polled.success) {
+            setSubmitResult({
+              score: polled.score,
+              metric: polled.metric,
+              detailed_scores: polled.detailed_scores,
+              submission_id: polled.submission_id,
+            });
+            return;
+          }
+          if (polled.status === "failed") {
+            throw new Error(polled.error || "Evaluation failed");
+          }
+        }
+        throw new Error("Timed out waiting for async evaluation");
+      }
       if (!res.ok || data.success !== true) {
         throw new Error(data.error || "Submission failed");
       }
-      setSubmitResult({ score: data.score });
+      setSubmitResult({
+        score: data.score,
+        metric: data.metric,
+        detailed_scores: data.detailed_scores,
+        submission_id: data.submission_id,
+      });
     } catch (e) {
       setErrorMsg(e.message || "Error submitting model");
     } finally {
@@ -153,7 +217,9 @@ const SubmitToLeaderboard = ({
         reference_data: { url: proposeForm.url || undefined, description: proposeForm.description || undefined }
       };
       const res = await fetch(`${API_BASE}/public/add_dataset`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        method: 'POST',
+        headers: buildHeaders(),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok || data.success !== true) throw new Error(data.error || 'Failed to add dataset');
@@ -717,6 +783,36 @@ const SubmitToLeaderboard = ({
           </button>
           <div className="text-lg font-semibold text-[#defe47] mb-3">Submit to Model Leaderboard</div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">API key (if server requires)</label>
+              <input
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#defe47]/70"
+                placeholder="X-API-Key value"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">Submitter id (for history; optional)</label>
+              <input
+                type="text"
+                value={submitterId}
+                onChange={(e) => setSubmitterId(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-[#defe47]/70"
+                placeholder="opaque id or email"
+              />
+            </div>
+          </div>
+          {submissionFormat && (
+            <div className="mb-3 text-xs text-gray-500 font-mono max-h-24 overflow-auto border border-gray-800 rounded p-2">
+              <div className="text-gray-400 mb-1">API template ({submissionFormat.task_type_normalized})</div>
+              <pre className="whitespace-pre-wrap break-all">{JSON.stringify(submissionFormat.submit_model_body, null, 0)}</pre>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
             <div className="md:col-span-2">
               <label className="block text-sm text-gray-300 mb-1">Benchmark</label>
@@ -800,7 +896,9 @@ const SubmitToLeaderboard = ({
             </div>
             <div className="mb-4">
             <div className="text-sm text-gray-300">
-              Use these sentences to generate your translations below.
+              {(submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type) === "translation"
+                ? "Use these sentences to generate your translations below."
+                : "Enter one prediction per row below (aligned with sentence ids)."}
             </div>
           </div>
 
@@ -848,7 +946,11 @@ const SubmitToLeaderboard = ({
                   <div className="text-white mb-2">{src}</div>
                   <textarea
                     className="w-full min-h-[60px] px-3 py-2 rounded-md bg-[#111827] border border-gray-700 text-white focus:outline-none focus:border-[#defe47]/70"
-                    placeholder="Enter your translation here"
+                    placeholder={
+                      (submissionFormat?.task_type_normalized || "").includes("translation")
+                        ? "Enter your translation here"
+                        : "Enter your model output for this example"
+                    }
                     value={translations[idx] || ""}
                     onChange={(e) => {
                       const next = [...translations];
@@ -885,8 +987,22 @@ const SubmitToLeaderboard = ({
           </div>
 
           {submitResult && (
-            <div className="mt-4 text-sm text-[#defe47]">
-              Success! Score: <span className="font-semibold">{submitResult.score?.toFixed(3)}</span>
+            <div className="mt-4 text-sm text-gray-200 space-y-1">
+              <div className="text-[#defe47]">
+                Success! Score:{" "}
+                <span className="font-semibold">
+                  {typeof submitResult.score === "number" ? submitResult.score.toFixed(4) : submitResult.score}
+                </span>
+                {submitResult.metric ? <span className="text-gray-400"> ({submitResult.metric})</span> : null}
+              </div>
+              {submitResult.submission_id != null && (
+                <div className="text-xs text-gray-500">Submission id: {submitResult.submission_id}</div>
+              )}
+              {submitResult.detailed_scores && (
+                <div className="text-xs font-mono text-gray-400 break-all">
+                  {formatMetricsSummary(submitResult.detailed_scores)}
+                </div>
+              )}
             </div>
           )}
         </div>

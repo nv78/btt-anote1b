@@ -244,9 +244,26 @@ Docker option:
 
 Notes
 - The demo uses an in-memory store by default (no DB needed).
-- If you configure MySQL and load `backend/database/schema.sql`, the API will persist to DB.
+- For MySQL persistence apply [`backend/database/schema_leaderboard.sql`](backend/database/schema_leaderboard.sql) (Leaderboard benchmark tables). The large [`backend/database/schema.sql`](backend/database/schema.sql) is a legacy monolith schema and is not required for the public leaderboard API.
 - Hugging Face imports require the optional `datasets` package:
   - `pip install datasets`
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `PORT` | Flask listen port (default `5000`; local UI often uses `5001`) |
+| `FLASK_ENV` | Use `development` for built-in CORS origins on ports 3000/3001 |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins (required outside development) |
+| `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT` | MySQL connection for `benchmark_datasets` / submissions |
+| `LEADERBOARD_API_KEYS` | Comma-separated keys; requests must send matching `X-API-Key` when enforcement is on |
+| `REQUIRE_API_KEY` | `1` / `true` / `yes` to require an API key on write routes |
+| `LEADERBOARD_JWT_SECRET` | If set, validates `Authorization: Bearer` HS256 JWTs; `sub` claim is stored as `submitter_id` |
+| `LEADERBOARD_API_BASE` | Default base URL for [`backend/sdk/leaderboard_sdk.py`](backend/sdk/leaderboard_sdk.py) and scripts |
+| `LEADERBOARD_API_KEY` | Default `X-API-Key` for the SDK |
+| `LEADERBOARD_JWT` | Optional bearer token for the SDK (`Authorization` header) |
+| `DISABLE_RATE_LIMIT` | Set to `1` to bypass in-process rate limits (dev only) |
+| Per-route limits | e.g. `SUBMIT_MODEL_RATE_LIMIT=10/minute`, `IMPORT_DATASET_RATE_LIMIT=5/minute` |
 
 ---
 
@@ -295,6 +312,13 @@ LEADERBOARD_API=http://127.0.0.1:5001 backend/scripts/submit_model_example.sh "Y
 ```
 
 Then `POST` that body (with real predictions) to `/public/submit_model`, including your API key header if the server enforces one.
+
+Example JSON bodies live under [`backend/examples/`](backend/examples/) (`submit_translation.json`, `submit_classification.json`, etc.).
+
+- **My submissions (API)**: `GET /public/my_submissions?submitter_id=...` with optional `X-API-Key`, or a valid JWT (`LEADERBOARD_JWT_SECRET` on the server). **UI**: `/my-submissions` on the React app.
+- **Async evaluation**: `POST /public/submit_model` with `"async": true` returns `202` and a `job_id`; poll `GET /public/eval_jobs/{job_id}` until `status` is `completed` or `failed`.
+- **Bulk HF import**: `python backend/scripts/bulk_import_hf.py backend/examples/hf_bulk_manifest.sample.json`
+- **Baseline seed (echo translation demo)**: `LEADERBOARD_API_KEY=... python backend/scripts/seed_baselines.py`
 
 Exports are available as JSON or CSV:
 

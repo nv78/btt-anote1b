@@ -581,6 +581,16 @@ class TranslationEvaluator(BaseEvaluator):
         bleu = float(np.mean(bleu_scores)) if bleu_scores else 0.0
         bleu_r = round(bleu, 4)
         out: Dict[str, float] = {"bleu": bleu_r}
+        hyp_list = [str(pred_map[gt["id"]]) for gt in ground_truth if gt["id"] in pred_map]
+        ref_list = [str(gt.get("answer", "")) for gt in ground_truth if gt["id"] in pred_map]
+        if hyp_list and ref_list and len(hyp_list) == len(ref_list):
+            try:
+                import sacrebleu as sb
+
+                ch = sb.corpus_chrf(hyp_list, [[r] for r in ref_list])
+                out["chrf"] = round(float(ch.score) / 100.0, 4)
+            except Exception:
+                pass
         try:
             from bert_score import score as bert_score_fn
 

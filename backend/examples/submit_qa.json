@@ -1,0 +1,13 @@
+{
+  "benchmarkDatasetName": "my_qa_dataset",
+  "modelName": "example-qa",
+  "submittedBy": "you@example.com",
+  "submitterId": "optional-opaque-id",
+  "sentence_ids": [0, 1, 2],
+  "modelResults": [
+    "<predicted_answer_0>",
+    "<predicted_answer_1>",
+    "<predicted_answer_2>"
+  ],
+  "metadata": {}
+}

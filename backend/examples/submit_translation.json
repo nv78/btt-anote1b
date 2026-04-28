@@ -1,0 +1,13 @@
+{
+  "benchmarkDatasetName": "flores_spanish_translation",
+  "modelName": "example-mt",
+  "submittedBy": "you@example.com",
+  "submitterId": "optional-opaque-id-for-my_submissions",
+  "sentence_ids": [0, 1, 2],
+  "modelResults": [
+    "<predicted_translation_0>",
+    "<predicted_translation_1>",
+    "<predicted_translation_2>"
+  ],
+  "metadata": {}
+}

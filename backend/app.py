@@ -12,6 +12,12 @@ from time import time
 from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 import uuid
+import threading
+
+try:
+    from auth_helpers import jwt_sub_from_request, resolve_submitter_id
+except ImportError:
+    from backend.auth_helpers import jwt_sub_from_request, resolve_submitter_id
 
 # Optional MySQL connection
 def get_db_connection():
@@ -190,8 +196,11 @@ def index():
             "/public/get_source_sentences",
             "/public/submission_format",
             "/public/submit_model",
+            "/public/eval_jobs/<job_id>",
+            "/public/my_submissions",
+            "/public/submissions/<id>",
             "/public/get_leaderboard",
-            "/api/leaderboard/*"
+            "/api/leaderboard/*",
         ],
         "note": "Set PORT=5001 for local frontend integration.",
     })
@@ -205,10 +214,14 @@ def health():
 
 # In-memory fallback storage when DB is not available
 _STORE = {
-    "submissions": [],  # {id, benchmark_dataset_name, model_name, results, created}
+    "submissions": [],  # {id, benchmark_dataset_name, model_name, submitter_id?, results, created}
     "evaluations": [],  # {submission_id, score, metric, evaluation_details?, created}
     "datasets": [],  # {name, task_type, evaluation_metric, reference_data}
 }
+
+# In-process async eval jobs (optional ``async: true`` on submit); not durable across restarts.
+_EVAL_JOBS: dict = {}
+_EVAL_JOBS_LOCK = threading.Lock()
 
 # UI-oriented datasets store (for add_dataset/add_model endpoints)
 LEADERBOARD_DATA = []  # list of dicts with fields per README
@@ -492,6 +505,9 @@ def submit_model():
             "error": "Length of sentence_ids must match length of modelResults",
         }), 400
 
+    submitter_id = resolve_submitter_id(request, data)
+    want_async = bool(data.get("async"))
+
     # Pull dataset metadata if available
     dataset = None
     conn_meta, cursor_meta = get_db_connection()
@@ -618,80 +634,352 @@ def submit_model():
 
     eval_details = {"metric": metric, "metadata": metadata, "detailed_scores": detailed_scores}
 
-    # Try to persist in DB; otherwise store in memory
+    def _persist_and_build_response():
+        submission_id = None
+        conn, cursor = get_db_connection()
+        if conn and cursor:
+            try:
+                cursor.execute(
+                    "SELECT id FROM benchmark_datasets WHERE name = %s",
+                    (benchmark_dataset_name,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    dataset_id = row['id']
+                else:
+                    cursor.execute(
+                        "INSERT INTO benchmark_datasets (name, task_type, evaluation_metric, reference_data, active) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (benchmark_dataset_name, 'translation', metric, json.dumps([]), True),
+                    )
+                    dataset_id = cursor.lastrowid
+
+                try:
+                    cursor.execute(
+                        "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, submitter_id, model_results) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (dataset_id, model_name, submitted_by, submitter_id, json.dumps(model_results)),
+                    )
+                except Exception as ins_err:
+                    if "submitter_id" in str(ins_err).lower() or "Unknown column" in str(ins_err):
+                        cursor.execute(
+                            "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results) "
+                            "VALUES (%s, %s, %s, %s)",
+                            (dataset_id, model_name, submitted_by, json.dumps(model_results)),
+                        )
+                    else:
+                        raise
+                submission_id = cursor.lastrowid
+
+                cursor.execute(
+                    "INSERT INTO evaluation_results (model_submission_id, score, evaluation_details) "
+                    "VALUES (%s, %s, %s)",
+                    (submission_id, float(score), json.dumps(eval_details)),
+                )
+                conn.commit()
+            except Exception as e:
+                print(f"DB write failed, storing in memory instead: {e}")
+                submission_id = None
+            finally:
+                try:
+                    cursor.close()
+                    conn.close()
+                except Exception:
+                    pass
+        else:
+            submission_id = None
+
+        if submission_id is None:
+            submission_id = len(_STORE["submissions"]) + 1
+            _STORE["submissions"].append({
+                "id": submission_id,
+                "benchmark_dataset_name": benchmark_dataset_name,
+                "model_name": model_name,
+                "submitted_by": submitted_by,
+                "submitter_id": submitter_id,
+                "metadata": metadata,
+                "results": model_results,
+                "created": utc_now(),
+            })
+            _STORE["evaluations"].append({
+                "submission_id": submission_id,
+                "score": float(score),
+                "metric": metric,
+                "evaluation_details": eval_details,
+                "created": utc_now(),
+            })
+
+        logger.info(
+            "model_submitted",
+            extra={"dataset": benchmark_dataset_name, "model": model_name, "score": float(score)},
+        )
+        return {
+            "success": True,
+            "submission_id": submission_id,
+            "score": float(score),
+            "metric": metric,
+            "detailed_scores": detailed_scores,
+        }
+
+    if want_async:
+
+        def _worker(job_id: str):
+            try:
+                out = _persist_and_build_response()
+                with _EVAL_JOBS_LOCK:
+                    _EVAL_JOBS[job_id] = {"status": "completed", **out}
+            except Exception as e:
+                with _EVAL_JOBS_LOCK:
+                    _EVAL_JOBS[job_id] = {"status": "failed", "error": str(e)}
+
+        job_id = str(uuid.uuid4())
+        with _EVAL_JOBS_LOCK:
+            _EVAL_JOBS[job_id] = {"status": "pending"}
+        t = threading.Thread(target=_worker, args=(job_id,), daemon=True)
+        t.start()
+        return jsonify({"success": True, "job_id": job_id, "status": "pending"}), 202
+
+    out = _persist_and_build_response()
+    return jsonify(out)
+
+
+@app.get("/public/eval_jobs/<job_id>")
+def eval_job_status(job_id):
+    """Poll async submit job created with ``{\"async\": true}`` on ``/public/submit_model``."""
+    with _EVAL_JOBS_LOCK:
+        row = _EVAL_JOBS.get(job_id)
+    if not row:
+        return jsonify({"success": False, "error": "Unknown job"}), 404
+    return jsonify({"success": True, **row})
+
+
+@app.get("/public/my_submissions")
+def my_submissions():
+    """List submissions for a submitter (JWT ``sub`` or ``submitter_id`` query with API key)."""
+    sub = jwt_sub_from_request(request)
+    if not sub:
+        configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
+        require_key = os.getenv("REQUIRE_API_KEY", "").lower() in {"1", "true", "yes"} or bool(configured)
+        if require_key:
+            supplied = request.headers.get("X-API-Key", "")
+            if supplied not in configured:
+                return jsonify({"success": False, "error": "Unauthorized"}), 401
+        sub = (request.args.get("submitter_id") or "").strip()
+    if not sub:
+        return jsonify({
+            "success": False,
+            "error": "Provide a valid Bearer JWT or submitter_id query parameter (with API key if required)",
+        }), 400
+
+    page = max(1, int(request.args.get("page", 1)))
+    page_size = min(100, max(1, int(request.args.get("page_size", 25))))
+    offset = (page - 1) * page_size
+
     conn, cursor = get_db_connection()
     if conn and cursor:
         try:
-            # Find dataset id (or create minimal if missing)
-            cursor.execute(
-                "SELECT id FROM benchmark_datasets WHERE name = %s",
-                (benchmark_dataset_name,)
-            )
-            row = cursor.fetchone()
-            if row:
-                dataset_id = row['id']
-            else:
+            try:
                 cursor.execute(
-                    "INSERT INTO benchmark_datasets (name, task_type, evaluation_metric, reference_data, active) "
-                    "VALUES (%s, %s, %s, %s, %s)",
-                    (benchmark_dataset_name, 'translation', metric, json.dumps([]), True)
+                    "SELECT COUNT(*) AS n FROM model_submissions WHERE submitter_id = %s",
+                    (sub,),
                 )
-                dataset_id = cursor.lastrowid
-
-            cursor.execute(
-                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results) "
-                "VALUES (%s, %s, %s, %s)",
-                (dataset_id, model_name, submitted_by, json.dumps(model_results))
-            )
-            submission_id = cursor.lastrowid
-
-            cursor.execute(
-                "INSERT INTO evaluation_results (model_submission_id, score, evaluation_details) "
-                "VALUES (%s, %s, %s)",
-                (submission_id, float(score), json.dumps(eval_details))
-            )
-            conn.commit()
-        except Exception as e:
-            print(f"DB write failed, storing in memory instead: {e}")
-            submission_id = None
+            except Exception:
+                cursor.execute(
+                    "SELECT COUNT(*) AS n FROM model_submissions WHERE submitted_by = %s",
+                    (sub,),
+                )
+            total = int((cursor.fetchone() or {}).get("n", 0))
+            try:
+                cursor.execute(
+                    "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, "
+                    "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
+                    "FROM model_submissions ms "
+                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                    "WHERE ms.submitter_id = %s "
+                    "ORDER BY ms.created DESC LIMIT %s OFFSET %s",
+                    (sub, page_size, offset),
+                )
+            except Exception:
+                cursor.execute(
+                    "SELECT ms.id, ms.model_name, ms.submitted_by, ms.created, "
+                    "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
+                    "FROM model_submissions ms "
+                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                    "WHERE ms.submitted_by = %s "
+                    "ORDER BY ms.created DESC LIMIT %s OFFSET %s",
+                    (sub, page_size, offset),
+                )
+            rows = cursor.fetchall()
+            items = []
+            for r in rows:
+                det = {}
+                if r.get("evaluation_details"):
+                    try:
+                        det = json.loads(r["evaluation_details"]) if isinstance(r["evaluation_details"], str) else r["evaluation_details"]
+                    except Exception:
+                        det = {}
+                items.append({
+                    "submission_id": r["id"],
+                    "dataset_name": r["dataset_name"],
+                    "task_type": r.get("task_type"),
+                    "model_name": r["model_name"],
+                    "submitted_by": r.get("submitted_by"),
+                    "score": float(r["score"]),
+                    "primary_metric": det.get("metric") if isinstance(det, dict) else None,
+                    "detailed_scores": det.get("detailed_scores") if isinstance(det, dict) else None,
+                    "submitted_at": r["created"].isoformat() if r.get("created") else None,
+                })
+            return jsonify({
+                "success": True,
+                "submissions": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+            })
         finally:
             try:
                 cursor.close()
                 conn.close()
             except Exception:
                 pass
-    else:
-        submission_id = None
 
-    if submission_id is None:
-        # In-memory fallback
-        submission_id = len(_STORE["submissions"]) + 1
-        _STORE["submissions"].append({
-            "id": submission_id,
-            "benchmark_dataset_name": benchmark_dataset_name,
-            "model_name": model_name,
-            "submitted_by": submitted_by,
-            "metadata": metadata,
-            "results": model_results,
-            "created": utc_now(),
+    mem = []
+    for ev in _STORE["evaluations"]:
+        sub_row = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
+        if not sub_row:
+            continue
+        sid = sub_row.get("submitter_id") or sub_row.get("submitted_by")
+        if sid != sub:
+            continue
+        det = ev.get("evaluation_details") or {}
+        mem.append({
+            "submission_id": sub_row["id"],
+            "dataset_name": sub_row["benchmark_dataset_name"],
+            "model_name": sub_row["model_name"],
+            "submitted_by": sub_row.get("submitted_by"),
+            "score": ev["score"],
+            "primary_metric": det.get("metric"),
+            "detailed_scores": det.get("detailed_scores"),
+            "submitted_at": sub_row["created"].isoformat(),
         })
-        _STORE["evaluations"].append({
-            "submission_id": submission_id,
-            "score": float(score),
-            "metric": metric,
-            "evaluation_details": eval_details,
-            "created": utc_now(),
-        })
-
-    logger.info(
-        "model_submitted",
-        extra={"dataset": benchmark_dataset_name, "model": model_name, "score": float(score)},
-    )
+    mem.sort(key=lambda x: x["submitted_at"], reverse=True)
+    total = len(mem)
+    page_rows = mem[offset:offset + page_size]
     return jsonify({
         "success": True,
-        "score": float(score),
-        "metric": metric,
-        "detailed_scores": detailed_scores,
+        "submissions": page_rows,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    })
+
+
+@app.get("/public/submissions/<int:submission_id>")
+def submission_detail(submission_id: int):
+    """Single submission row if it belongs to the requester (JWT or submitter_id query + API key)."""
+    sub = jwt_sub_from_request(request)
+    if not sub:
+        configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
+        require_key = os.getenv("REQUIRE_API_KEY", "").lower() in {"1", "true", "yes"} or bool(configured)
+        if require_key:
+            supplied = request.headers.get("X-API-Key", "")
+            if supplied not in configured:
+                return jsonify({"success": False, "error": "Unauthorized"}), 401
+        sub = (request.args.get("submitter_id") or "").strip()
+    if not sub:
+        return jsonify({"success": False, "error": "JWT or submitter_id required"}), 400
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            try:
+                cursor.execute(
+                    "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.model_results, ms.created, "
+                    "bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, er.score, er.evaluation_details "
+                    "FROM model_submissions ms "
+                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                    "WHERE ms.id = %s",
+                    (submission_id,),
+                )
+            except Exception:
+                cursor.execute(
+                    "SELECT ms.id, ms.model_name, ms.submitted_by, ms.model_results, ms.created, "
+                    "bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, er.score, er.evaluation_details "
+                    "FROM model_submissions ms "
+                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                    "WHERE ms.id = %s",
+                    (submission_id,),
+                )
+            r = cursor.fetchone()
+            if not r:
+                return jsonify({"success": False, "error": "Not found"}), 404
+            owner = (r.get("submitter_id") or r.get("submitted_by") or "")
+            if owner != sub:
+                return jsonify({"success": False, "error": "Forbidden"}), 403
+            det = {}
+            if r.get("evaluation_details"):
+                try:
+                    det = json.loads(r["evaluation_details"]) if isinstance(r["evaluation_details"], str) else r["evaluation_details"]
+                except Exception:
+                    det = {}
+            mr = r.get("model_results")
+            if isinstance(mr, str):
+                try:
+                    mr = json.loads(mr)
+                except Exception:
+                    pass
+            return jsonify({
+                "success": True,
+                "submission": {
+                    "submission_id": r["id"],
+                    "dataset_name": r["dataset_name"],
+                    "task_type": r.get("task_type"),
+                    "evaluation_metric": r.get("evaluation_metric"),
+                    "model_name": r["model_name"],
+                    "submitted_by": r.get("submitted_by"),
+                    "model_results": mr,
+                    "score": float(r["score"]),
+                    "metric": det.get("metric") if isinstance(det, dict) else None,
+                    "detailed_scores": det.get("detailed_scores") if isinstance(det, dict) else None,
+                    "metadata": det.get("metadata") if isinstance(det, dict) else None,
+                    "submitted_at": r["created"].isoformat() if r.get("created") else None,
+                },
+            })
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    sub_row = next((s for s in _STORE["submissions"] if s["id"] == submission_id), None)
+    if not sub_row:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    owner = sub_row.get("submitter_id") or sub_row.get("submitted_by")
+    if owner != sub:
+        return jsonify({"success": False, "error": "Forbidden"}), 403
+    ev = next((e for e in _STORE["evaluations"] if e["submission_id"] == submission_id), None)
+    if not ev:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    det = ev.get("evaluation_details") or {}
+    return jsonify({
+        "success": True,
+        "submission": {
+            "submission_id": sub_row["id"],
+            "dataset_name": sub_row["benchmark_dataset_name"],
+            "model_name": sub_row["model_name"],
+            "submitted_by": sub_row.get("submitted_by"),
+            "model_results": sub_row.get("results"),
+            "score": ev["score"],
+            "metric": det.get("metric"),
+            "detailed_scores": det.get("detailed_scores"),
+            "metadata": det.get("metadata"),
+            "submitted_at": sub_row["created"].isoformat(),
+        },
     })
 
 
@@ -951,16 +1239,68 @@ def list_task_metrics(task_type):
 @app.get('/openapi.json')
 def openapi_spec():
     """Small OpenAPI document for public integration endpoints."""
+    submit_schema = {
+        "type": "object",
+        "required": ["benchmarkDatasetName", "modelName", "modelResults", "sentence_ids"],
+        "properties": {
+            "benchmarkDatasetName": {"type": "string"},
+            "modelName": {"type": "string"},
+            "submittedBy": {"type": "string"},
+            "submitterId": {"type": "string", "description": "Opaque id for my_submissions when not using JWT"},
+            "sentence_ids": {"type": "array", "items": {"type": "integer"}},
+            "modelResults": {"type": "array", "items": {"type": "string"}},
+            "metadata": {"type": "object"},
+            "async": {"type": "boolean", "description": "If true, returns 202 with job_id; poll GET /public/eval_jobs/{job_id}"},
+        },
+    }
     return jsonify({
         "openapi": "3.0.3",
-        "info": {"title": "Anote Leaderboard API", "version": "0.2.0"},
+        "info": {"title": "Anote Leaderboard API", "version": "0.3.0"},
+        "components": {
+            "securitySchemes": {
+                "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+            }
+        },
         "paths": {
             "/public/datasets": {"get": {"summary": "List public datasets"}},
-            "/public/add_dataset": {"post": {"summary": "Create a public dataset"}},
-            "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split"}},
-            "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source"}},
-            "/public/submission_format": {"get": {"summary": "Expected submit_model JSON for a dataset"}},
-            "/public/submit_model": {"post": {"summary": "Submit model outputs for evaluation"}},
+            "/public/add_dataset": {"post": {"summary": "Create a public dataset", "security": [{"ApiKeyAuth": []}]}},
+            "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split", "security": [{"ApiKeyAuth": []}]}},
+            "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source", "security": [{"ApiKeyAuth": []}]}},
+            "/public/submission_format": {
+                "get": {
+                    "summary": "Expected submit_model JSON for a dataset",
+                    "parameters": [{"name": "dataset", "in": "query", "required": True, "schema": {"type": "string"}}],
+                }
+            },
+            "/public/submit_model": {
+                "post": {
+                    "summary": "Submit model outputs for evaluation",
+                    "security": [{"ApiKeyAuth": []}],
+                    "requestBody": {"content": {"application/json": {"schema": submit_schema}}},
+                    "responses": {
+                        "200": {"description": "Sync result", "content": {"application/json": {"schema": {"type": "object"}}}},
+                        "202": {"description": "Async accepted when async=true"},
+                    },
+                }
+            },
+            "/public/eval_jobs/{job_id}": {"get": {"summary": "Poll async submit job status"}},
+            "/public/my_submissions": {
+                "get": {
+                    "summary": "List submissions for JWT sub or submitter_id query",
+                    "parameters": [
+                        {"name": "submitter_id", "in": "query", "schema": {"type": "string"}},
+                        {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}},
+                        {"name": "page_size", "in": "query", "schema": {"type": "integer", "default": 25}},
+                    ],
+                }
+            },
+            "/public/submissions/{submission_id}": {
+                "get": {
+                    "summary": "Submission detail (owner scoped)",
+                    "parameters": [{"name": "submission_id", "in": "path", "required": True, "schema": {"type": "integer"}}],
+                }
+            },
             "/public/get_leaderboard": {
                 "get": {
                     "summary": "Get leaderboard rows",

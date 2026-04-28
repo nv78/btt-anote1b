@@ -1,0 +1,17 @@
+[
+  {
+    "dataset_name": "ag_news",
+    "split": "test",
+    "limit": 200,
+    "task_type": "text_classification",
+    "display_name": "AG News (sample)"
+  },
+  {
+    "dataset_name": "squad",
+    "config": "plain_text",
+    "split": "validation",
+    "limit": 100,
+    "task_type": "document_qa",
+    "display_name": "SQuAD sample"
+  }
+]

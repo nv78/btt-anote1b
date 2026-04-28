@@ -19,7 +19,8 @@ import Evaluations  from "./landing_page_components/Evaluations"
 import AdminLeaderboardManager from "./landing_page_components/AdminLeaderboardManager";
 import AddDataset from "./landing_page_components/AddDataset";
 import DatasetDetails from "./landing_page_components/DatasetDetails";
-import { submittoleaderboardPath, adminLeaderboardPath, evaluationsPath, csvBenchmarksPath, addDatasetPath } from "../constants/RouteConstants";
+import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, evaluationsPath, csvBenchmarksPath, addDatasetPath } from "../constants/RouteConstants";
+import MySubmissions from "./landing_page_components/MySubmissions";
 import HeaderBar from "./landing_page_components/HeaderBar";
 import CsvBenchmarksDemo from "./landing_page_components/CsvBenchmarksDemo";
 
@@ -69,6 +70,7 @@ function LandingPage() {
         <Routes>
           <Route index element={<Leaderboard />} />,
           <Route path={submittoleaderboardPath} index element={<SubmitToLeaderboard />} />,
+          <Route path={mySubmissionsPath} index element={<MySubmissions />} />,
           <Route path={evaluationsPath} index element={<Evaluations />} />,
           <Route path={csvBenchmarksPath} index element={<CsvBenchmarksDemo />} />,
           <Route path={addDatasetPath} index element={<AddDataset />} />,

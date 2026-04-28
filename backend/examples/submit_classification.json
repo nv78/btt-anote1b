@@ -1,0 +1,13 @@
+{
+  "benchmarkDatasetName": "my_classification_dataset",
+  "modelName": "example-clf",
+  "submittedBy": "you@example.com",
+  "submitterId": "optional-opaque-id",
+  "sentence_ids": [0, 1, 2],
+  "modelResults": [
+    "<predicted_label_0>",
+    "<predicted_label_1>",
+    "<predicted_label_2>"
+  ],
+  "metadata": {}
+}

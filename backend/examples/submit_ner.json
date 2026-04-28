@@ -1,0 +1,12 @@
+{
+  "benchmarkDatasetName": "my_ner_dataset",
+  "modelName": "example-ner",
+  "submittedBy": "you@example.com",
+  "submitterId": "optional-opaque-id",
+  "sentence_ids": [0, 1],
+  "modelResults": [
+    "ENTITY_ONE; ENTITY_TWO",
+    "ORG_A; LOC_B"
+  ],
+  "metadata": {}
+}

@@ -135,7 +135,9 @@ def _pick_primary(detailed: Dict[str, Any], requested: str, task_norm: str) -> f
     elif requested == "bertscore":
         order = ["bertscore", "bertscore_unavailable", "bleu"]
     elif requested == "bleu":
-        order = ["bleu", "bertscore", "bertscore_unavailable"]
+        order = ["bleu", "chrf", "bertscore", "bertscore_unavailable"]
+    elif requested == "chrf":
+        order = ["chrf", "bleu", "bertscore", "bertscore_unavailable"]
     else:
         order = [requested, "accuracy", "f1", "exact_match", "bleu"]
     for key in order:
