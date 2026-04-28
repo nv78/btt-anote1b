@@ -1,13 +1,20 @@
 // Simple SDK for the leaderboard API (browser-friendly)
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
 
+function browserBearer() {
+  if (typeof sessionStorage === "undefined") return "";
+  return sessionStorage.getItem("lb_jwt") || "";
+}
+
 async function http(method, path, body) {
   const apiKey = process.env.REACT_APP_LEADERBOARD_API_KEY;
+  const jwt = browserBearer();
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+      ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });

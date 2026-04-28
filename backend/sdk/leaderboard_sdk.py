@@ -127,10 +127,13 @@ class LeaderboardClient:
         dataset: Optional[str] = None,
         page: int = 1,
         page_size: int = 25,
+        cursor: Optional[str] = None,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"page": page, "page_size": page_size}
         if dataset:
             params["dataset"] = dataset
+        if cursor:
+            params["cursor"] = cursor
         return self._request("GET", "/public/get_leaderboard", params=params)
 
     def get_source_sentences(
@@ -189,11 +192,50 @@ class LeaderboardClient:
         submitter_id: Optional[str] = None,
         page: int = 1,
         page_size: int = 25,
+        cursor: Optional[str] = None,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"page": page, "page_size": page_size}
         if submitter_id:
             params["submitter_id"] = submitter_id
+        if cursor:
+            params["cursor"] = cursor
         return self._request("GET", "/public/my_submissions", params=params)
+
+    def admin_submissions(
+        self,
+        admin_key: str,
+        *,
+        dataset: Optional[str] = None,
+        submitter_id: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 25,
+        cursor: Optional[str] = None,
+        include_outputs: bool = False,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        if dataset:
+            params["dataset"] = dataset
+        if submitter_id:
+            params["submitter_id"] = submitter_id
+        if date_from:
+            params["from"] = date_from
+        if date_to:
+            params["to"] = date_to
+        if cursor:
+            params["cursor"] = cursor
+        if include_outputs:
+            params["include_outputs"] = "1"
+        url = f"{self.base_url}/api/admin/submissions"
+        r = requests.get(
+            url,
+            params=params,
+            headers={**self._headers(), "X-Admin-Key": admin_key},
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        return r.json()
 
     def submission_detail(self, submission_id: int, submitter_id: Optional[str] = None) -> Dict[str, Any]:
         import urllib.parse as _u

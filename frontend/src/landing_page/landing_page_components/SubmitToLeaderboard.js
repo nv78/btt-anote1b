@@ -16,6 +16,7 @@ import {
   FlowTypeFileName,
 } from "../../constants/DbEnums";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
+import { getLeaderboardJwt } from "../../utils/leaderboardAuth";
 
 // Simple API base for dev
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
@@ -80,6 +81,8 @@ const SubmitToLeaderboard = ({
     const h = {};
     if (json) h["Content-Type"] = "application/json";
     if (apiKey.trim()) h["X-API-Key"] = apiKey.trim();
+    const jwt = getLeaderboardJwt();
+    if (jwt) h["Authorization"] = `Bearer ${jwt}`;
     return h;
   };
 

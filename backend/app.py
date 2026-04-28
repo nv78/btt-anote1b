@@ -4,12 +4,13 @@ import csv
 import logging
 import re
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import StringIO
 from time import time
+from urllib.parse import quote
 
-from flask import Flask, Response, request, jsonify
+from flask import Flask, Response, request, jsonify, redirect
 from flask_cors import CORS
 import uuid
 import threading
@@ -18,6 +19,23 @@ try:
     from auth_helpers import jwt_sub_from_request, resolve_submitter_id
 except ImportError:
     from backend.auth_helpers import jwt_sub_from_request, resolve_submitter_id
+
+try:
+    from pagination import (
+        decode_cursor,
+        leaderboard_cursor_decode,
+        leaderboard_cursor_encode,
+        my_submissions_cursor_decode,
+        my_submissions_cursor_encode,
+    )
+except ImportError:
+    from backend.pagination import (  # type: ignore
+        decode_cursor,
+        leaderboard_cursor_decode,
+        leaderboard_cursor_encode,
+        my_submissions_cursor_decode,
+        my_submissions_cursor_encode,
+    )
 
 # Optional MySQL connection
 def get_db_connection():
@@ -39,6 +57,7 @@ def get_db_connection():
 
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-insecure-change-me")
 app.config['JSON_SORT_KEYS'] = False
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -61,6 +80,29 @@ elif _flask_env == "development":
 else:
     raise RuntimeError("ALLOWED_ORIGINS must be set outside development")
 CORS(app, resources={r"/*": {"origins": _origins_list}})
+
+
+def _init_google_oauth(app_):
+    cid = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    if not cid:
+        return None
+    try:
+        from authlib.integrations.flask_client import OAuth
+    except ImportError:
+        logger.warning("authlib_not_installed", extra={"hint": "pip install Authlib"})
+        return None
+    oauth = OAuth(app_)
+    oauth.register(
+        name="google",
+        client_id=cid,
+        client_secret=os.getenv("GOOGLE_CLIENT_SECRET", "").strip(),
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
+    return oauth
+
+
+_OAUTH = _init_google_oauth(app)
 
 
 @app.after_request
@@ -91,6 +133,16 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+def _parse_iso_datetime(val):
+    if not val or not isinstance(val, str):
+        return None
+    s = val.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
 def validate_text(value, field, max_len=200):
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} cannot be empty")
@@ -112,6 +164,8 @@ def validate_metadata(value):
 
 
 def require_api_key(fn):
+    """Writes: ``X-API-Key`` in ``LEADERBOARD_API_KEYS`` or Bearer JWT when ``LEADERBOARD_JWT_SECRET`` is set."""
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
         configured = [key.strip() for key in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if key.strip()]
@@ -119,8 +173,35 @@ def require_api_key(fn):
         if not require_key:
             return fn(*args, **kwargs)
         supplied = request.headers.get("X-API-Key", "")
-        if supplied not in configured:
-            logger.warning("unauthorized_write", extra={"endpoint": request.path, "ip": request.remote_addr})
+        if supplied in configured:
+            return fn(*args, **kwargs)
+        secret = os.getenv("LEADERBOARD_JWT_SECRET", "").strip()
+        if secret:
+            auth = request.headers.get("Authorization", "") or ""
+            if auth.startswith("Bearer "):
+                try:
+                    import jwt  # PyJWT
+
+                    jwt.decode(auth[7:].strip(), secret, algorithms=["HS256"])
+                    return fn(*args, **kwargs)
+                except Exception:
+                    pass
+        logger.warning("unauthorized_write", extra={"endpoint": request.path, "ip": request.remote_addr})
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+    return wrapper
+
+
+def require_admin(fn):
+    """Admin list/moderation: ``X-Admin-Key`` or ``X-API-Key`` must match ``LEADERBOARD_ADMIN_API_KEYS``."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        keys = [k.strip() for k in os.getenv("LEADERBOARD_ADMIN_API_KEYS", "").split(",") if k.strip()]
+        if not keys:
+            return jsonify({"success": False, "error": "Admin API not configured"}), 503
+        supplied = (request.headers.get("X-Admin-Key") or request.headers.get("X-API-Key") or "").strip()
+        if supplied not in keys:
             return jsonify({"success": False, "error": "Unauthorized"}), 401
         return fn(*args, **kwargs)
 
@@ -200,6 +281,10 @@ def index():
             "/public/my_submissions",
             "/public/submissions/<id>",
             "/public/get_leaderboard",
+            "/public/export/leaderboard",
+            "/public/auth/google/start",
+            "/public/auth/google/callback",
+            "/api/admin/submissions",
             "/api/leaderboard/*",
         ],
         "note": "Set PORT=5001 for local frontend integration.",
@@ -345,16 +430,71 @@ def submission_format():
     return jsonify(payload)
 
 
+def _mem_leaderboard_row_after_anchor(item, dataset_filter, single_ds, an_d, an_s, an_i):
+    """True if item sorts strictly after anchor (DB order: dataset ASC, score DESC, id DESC)."""
+    ev, sub = item
+    name = sub["benchmark_dataset_name"]
+    sc = float(ev["score"])
+    sid = int(sub["id"])
+    if dataset_filter:
+        return (sc < float(an_s)) or (sc == float(an_s) and sid < int(an_i))
+    return (name > an_d) or (name == an_d and sc < float(an_s)) or (name == an_d and sc == float(an_s) and sid < int(an_i))
+
+
 @app.get('/public/get_leaderboard')
 def get_leaderboard():
     """Get leaderboard showing model submissions and scores.
     Supports DB if configured, otherwise returns in-memory results.
+
+    Pagination: ``page`` + offset (default), or ``cursor`` (keyset; ignores ``page``).
+    Sort: ``dataset_name`` ASC, ``score`` DESC, ``submission_id`` DESC.
     """
     dataset_filter = request.args.get("dataset")
+    cursor_token = (request.args.get("cursor") or "").strip()
     page = max(1, int(request.args.get("page", 1)))
     page_size = min(100, max(1, int(request.args.get("page_size", request.args.get("limit", 25)))))
     offset = (page - 1) * page_size
+    use_cursor = bool(cursor_token)
+    rank_start = 1
+    key_single = bool(dataset_filter)
+
+    if use_cursor:
+        cd = decode_cursor(cursor_token)
+        dec = leaderboard_cursor_decode(cd) if cd else None
+        if not dec:
+            return jsonify({"success": False, "error": "Invalid cursor"}), 400
+        key_single, an_d, an_s, an_i, rank_start = dec
+        if bool(dataset_filter) != key_single:
+            return jsonify({"success": False, "error": "Cursor dataset scope mismatch"}), 400
+        if dataset_filter and key_single:
+            an_d = ""
+
     conn, cursor = get_db_connection()
+
+    def _rows_to_leaderboard(rows, r0):
+        leaderboard = []
+        for j, row in enumerate(rows):
+            details = {}
+            if row.get("evaluation_details"):
+                try:
+                    details = json.loads(row["evaluation_details"]) if isinstance(row["evaluation_details"], str) else row["evaluation_details"]
+                except Exception:
+                    details = {}
+            leaderboard.append({
+                "rank": r0 + j,
+                "submission_id": row.get("submission_id"),
+                "model_name": row["model_name"],
+                "dataset_name": row["dataset_name"],
+                "task_type": row.get("task_type"),
+                "evaluation_metric": row.get("evaluation_metric"),
+                "score": float(row["score"]),
+                "submitted_by": row.get("submitted_by"),
+                "metadata": details.get("metadata") if isinstance(details, dict) else None,
+                "detailed_scores": details.get("detailed_scores") if isinstance(details, dict) else None,
+                "primary_metric": details.get("metric") if isinstance(details, dict) else None,
+                "submitted_at": row["submitted_at"].isoformat() if row.get("submitted_at") else None,
+            })
+        return leaderboard
 
     if conn and cursor:
         try:
@@ -375,47 +515,55 @@ def get_leaderboard():
             total_row = cursor.fetchone() or {}
             total = int(total_row.get("total", 0))
 
-            query = (
-                "SELECT ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
+            base_select = (
+                "SELECT ms.id AS submission_id, ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
                 "er.score, er.evaluation_details, ms.created AS submitted_at, "
                 "ms.submitted_by, ms.model_results "
                 "FROM model_submissions ms "
                 "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
                 "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                f"{where} "
-                "ORDER BY bd.name, er.score DESC "
-                "LIMIT %s OFFSET %s"
             )
-            cursor.execute(query, tuple(params + [page_size, offset]))
+            order = "ORDER BY bd.name ASC, er.score DESC, ms.id DESC "
+
+            if use_cursor:
+                wk = list(params)
+                if dataset_filter:
+                    where_k = where + " AND ((er.score < %s) OR (er.score = %s AND ms.id < %s))"
+                    wk.extend([an_s, an_s, an_i])
+                else:
+                    where_k = where + (
+                        " AND ((bd.name > %s) OR (bd.name = %s AND er.score < %s) "
+                        "OR (bd.name = %s AND er.score = %s AND ms.id < %s))"
+                    )
+                    wk.extend([an_d, an_d, an_s, an_d, an_s, an_i])
+                query = base_select + where_k + order + "LIMIT %s"
+                cursor.execute(query, tuple(wk + [page_size]))
+            else:
+                query = base_select + where + order + "LIMIT %s OFFSET %s"
+                cursor.execute(query, tuple(params + [page_size, offset]))
+
             rows = cursor.fetchall()
-            leaderboard = []
-            for i, row in enumerate(rows, start=offset):
-                details = {}
-                if row.get("evaluation_details"):
-                    try:
-                        details = json.loads(row["evaluation_details"]) if isinstance(row["evaluation_details"], str) else row["evaluation_details"]
-                    except Exception:
-                        details = {}
-                leaderboard.append({
-                    "rank": i + 1,
-                    "model_name": row['model_name'],
-                    "dataset_name": row['dataset_name'],
-                    "task_type": row.get('task_type'),
-                    "evaluation_metric": row.get('evaluation_metric'),
-                    "score": float(row['score']),
-                    "submitted_by": row.get("submitted_by"),
-                    "metadata": details.get("metadata") if isinstance(details, dict) else None,
-                    "detailed_scores": details.get("detailed_scores") if isinstance(details, dict) else None,
-                    "primary_metric": details.get("metric") if isinstance(details, dict) else None,
-                    "submitted_at": row['submitted_at'].isoformat() if row.get('submitted_at') else None,
-                })
-            return jsonify({
+            r0 = rank_start if use_cursor else offset + 1
+            leaderboard = _rows_to_leaderboard(rows, r0)
+            out = {
                 "success": True,
                 "leaderboard": leaderboard,
-                "page": page,
+                "page": page if not use_cursor else None,
                 "page_size": page_size,
                 "total": total,
-            })
+            }
+            has_more = len(rows) == page_size and (use_cursor or offset + len(rows) < total)
+            if has_more:
+                last = rows[-1]
+                next_r = r0 + len(rows)
+                out["next_cursor"] = leaderboard_cursor_encode(
+                    dataset_name=last["dataset_name"],
+                    score=float(last["score"]),
+                    submission_id=int(last["submission_id"]),
+                    next_rank_start=next_r,
+                    single_dataset=bool(dataset_filter),
+                )
+            return jsonify(out)
         except Exception as e:
             logger.exception("leaderboard_db_read_failed", extra={"error": str(e)})
         finally:
@@ -434,11 +582,22 @@ def get_leaderboard():
         if dataset_filter and sub["benchmark_dataset_name"] != dataset_filter:
             continue
         mem_all.append((ev, sub))
-    mem_all.sort(key=lambda x: x[0]["score"], reverse=True)
+    mem_all.sort(key=lambda x: (x[1]["benchmark_dataset_name"], -float(x[0]["score"]), -int(x[1]["id"])))
     total = len(mem_all)
-    mem = mem_all[offset:offset + page_size]
+
+    if use_cursor:
+        mem = []
+        for item in mem_all:
+            if not _mem_leaderboard_row_after_anchor(item, dataset_filter, key_single, an_d, an_s, an_i):
+                continue
+            mem.append(item)
+            if len(mem) >= page_size:
+                break
+    else:
+        mem = mem_all[offset : offset + page_size]
+
     leaderboard = []
-    for i, (ev, sub) in enumerate(mem, start=offset):
+    for j, (ev, sub) in enumerate(mem):
         ev_details = ev.get("evaluation_details") or {}
         if not isinstance(ev_details, dict):
             ev_details = {}
@@ -447,7 +606,8 @@ def get_leaderboard():
             None,
         )
         leaderboard.append({
-            "rank": i + 1,
+            "rank": rank_start + j if use_cursor else offset + j + 1,
+            "submission_id": sub["id"],
             "model_name": sub["model_name"],
             "dataset_name": sub["benchmark_dataset_name"],
             "task_type": (ds_meta or {}).get("task_type") or "translation",
@@ -459,13 +619,25 @@ def get_leaderboard():
             "primary_metric": ev_details.get("metric"),
             "submitted_at": sub["created"].isoformat(),
         })
-    return jsonify({
+    out = {
         "success": True,
         "leaderboard": leaderboard,
-        "page": page,
+        "page": page if not use_cursor else None,
         "page_size": page_size,
         "total": total,
-    })
+    }
+    mem_has_more = len(mem) == page_size and (use_cursor or offset + page_size < total)
+    if mem_has_more:
+        last_ev, last_sub = mem[-1]
+        next_r = rank_start + len(mem) if use_cursor else offset + len(mem) + 1
+        out["next_cursor"] = leaderboard_cursor_encode(
+            dataset_name=last_sub["benchmark_dataset_name"],
+            score=float(last_ev["score"]),
+            submission_id=int(last_sub["id"]),
+            next_rank_start=next_r,
+            single_dataset=bool(dataset_filter),
+        )
+    return jsonify(out)
 
 
 @app.post('/public/submit_model')
@@ -755,7 +927,10 @@ def eval_job_status(job_id):
 
 @app.get("/public/my_submissions")
 def my_submissions():
-    """List submissions for a submitter (JWT ``sub`` or ``submitter_id`` query with API key)."""
+    """List submissions for a submitter (JWT ``sub`` or ``submitter_id`` query with API key).
+
+    Pagination: ``page`` + offset (default), or ``cursor`` (keyset on ``created DESC``, ``id DESC``; ignores ``page``).
+    """
     sub = jwt_sub_from_request(request)
     if not sub:
         configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
@@ -774,6 +949,19 @@ def my_submissions():
     page = max(1, int(request.args.get("page", 1)))
     page_size = min(100, max(1, int(request.args.get("page_size", 25))))
     offset = (page - 1) * page_size
+    cursor_token = (request.args.get("cursor") or "").strip()
+    use_cursor = bool(cursor_token)
+    anchor_c = None
+    anchor_id = None
+    if use_cursor:
+        cd = decode_cursor(cursor_token)
+        dec = my_submissions_cursor_decode(cd) if cd else None
+        if not dec:
+            return jsonify({"success": False, "error": "Invalid cursor"}), 400
+        c_iso, anchor_id = dec
+        anchor_c = _parse_iso_datetime(c_iso)
+        if anchor_c is None:
+            return jsonify({"success": False, "error": "Invalid cursor"}), 400
 
     conn, cursor = get_db_connection()
     if conn and cursor:
@@ -789,28 +977,57 @@ def my_submissions():
                     (sub,),
                 )
             total = int((cursor.fetchone() or {}).get("n", 0))
+            cur_sql = ""
+            cur_params: list = []
+            if use_cursor:
+                cur_sql = " AND ((ms.created < %s) OR (ms.created = %s AND ms.id < %s))"
+                cur_params = [anchor_c, anchor_c, anchor_id]
             try:
-                cursor.execute(
-                    "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, "
-                    "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
-                    "FROM model_submissions ms "
-                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
-                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                    "WHERE ms.submitter_id = %s "
-                    "ORDER BY ms.created DESC LIMIT %s OFFSET %s",
-                    (sub, page_size, offset),
-                )
+                if use_cursor:
+                    cursor.execute(
+                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, "
+                        "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
+                        "FROM model_submissions ms "
+                        "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                        "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                        "WHERE ms.submitter_id = %s " + cur_sql +
+                        "ORDER BY ms.created DESC, ms.id DESC LIMIT %s",
+                        tuple([sub] + cur_params + [page_size]),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, "
+                        "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
+                        "FROM model_submissions ms "
+                        "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                        "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                        "WHERE ms.submitter_id = %s "
+                        "ORDER BY ms.created DESC, ms.id DESC LIMIT %s OFFSET %s",
+                        (sub, page_size, offset),
+                    )
             except Exception:
-                cursor.execute(
-                    "SELECT ms.id, ms.model_name, ms.submitted_by, ms.created, "
-                    "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
-                    "FROM model_submissions ms "
-                    "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
-                    "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                    "WHERE ms.submitted_by = %s "
-                    "ORDER BY ms.created DESC LIMIT %s OFFSET %s",
-                    (sub, page_size, offset),
-                )
+                if use_cursor:
+                    cursor.execute(
+                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.created, "
+                        "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
+                        "FROM model_submissions ms "
+                        "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                        "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                        "WHERE ms.submitted_by = %s " + cur_sql +
+                        "ORDER BY ms.created DESC, ms.id DESC LIMIT %s",
+                        tuple([sub] + cur_params + [page_size]),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.created, "
+                        "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
+                        "FROM model_submissions ms "
+                        "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                        "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                        "WHERE ms.submitted_by = %s "
+                        "ORDER BY ms.created DESC, ms.id DESC LIMIT %s OFFSET %s",
+                        (sub, page_size, offset),
+                    )
             rows = cursor.fetchall()
             items = []
             for r in rows:
@@ -831,13 +1048,19 @@ def my_submissions():
                     "detailed_scores": det.get("detailed_scores") if isinstance(det, dict) else None,
                     "submitted_at": r["created"].isoformat() if r.get("created") else None,
                 })
-            return jsonify({
+            out = {
                 "success": True,
                 "submissions": items,
-                "page": page,
+                "page": page if not use_cursor else None,
                 "page_size": page_size,
                 "total": total,
-            })
+            }
+            ms_more = len(rows) == page_size and (use_cursor or offset + len(rows) < total)
+            if ms_more and rows:
+                lr = rows[-1]
+                ca = lr["created"].isoformat() if lr.get("created") else ""
+                out["next_cursor"] = my_submissions_cursor_encode(ca, int(lr["id"]))
+            return jsonify(out)
         finally:
             try:
                 cursor.close()
@@ -845,7 +1068,7 @@ def my_submissions():
             except Exception:
                 pass
 
-    mem = []
+    mem_raw = []
     for ev in _STORE["evaluations"]:
         sub_row = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
         if not sub_row:
@@ -854,7 +1077,9 @@ def my_submissions():
         if sid != sub:
             continue
         det = ev.get("evaluation_details") or {}
-        mem.append({
+        if not isinstance(det, dict):
+            det = {}
+        mem_raw.append({
             "submission_id": sub_row["id"],
             "dataset_name": sub_row["benchmark_dataset_name"],
             "model_name": sub_row["model_name"],
@@ -862,18 +1087,287 @@ def my_submissions():
             "score": ev["score"],
             "primary_metric": det.get("metric"),
             "detailed_scores": det.get("detailed_scores"),
-            "submitted_at": sub_row["created"].isoformat(),
+            "_created": sub_row["created"],
+            "_id": sub_row["id"],
         })
-    mem.sort(key=lambda x: x["submitted_at"], reverse=True)
-    total = len(mem)
-    page_rows = mem[offset:offset + page_size]
-    return jsonify({
+    mem_raw.sort(key=lambda x: (x["_created"], x["_id"]), reverse=True)
+    total = len(mem_raw)
+    if use_cursor:
+        page_rows = []
+        for r in mem_raw:
+            if (r["_created"] < anchor_c) or (r["_created"] == anchor_c and r["_id"] < anchor_id):
+                page_rows.append(r)
+            if len(page_rows) >= page_size:
+                break
+    else:
+        page_rows = mem_raw[offset:offset + page_size]
+
+    items = []
+    for r in page_rows:
+        items.append({
+            "submission_id": r["submission_id"],
+            "dataset_name": r["dataset_name"],
+            "model_name": r["model_name"],
+            "submitted_by": r["submitted_by"],
+            "score": r["score"],
+            "primary_metric": r["primary_metric"],
+            "detailed_scores": r["detailed_scores"],
+            "submitted_at": r["_created"].isoformat(),
+        })
+    out = {
         "success": True,
-        "submissions": page_rows,
-        "page": page,
+        "submissions": items,
+        "page": page if not use_cursor else None,
         "page_size": page_size,
         "total": total,
-    })
+    }
+    ms_more = len(page_rows) == page_size and (use_cursor or offset + page_size < total)
+    if ms_more and page_rows:
+        last = page_rows[-1]
+        out["next_cursor"] = my_submissions_cursor_encode(last["_created"].isoformat(), int(last["_id"]))
+    return jsonify(out)
+
+
+def _evaluation_snippet_and_body(det_raw, include_outputs: bool):
+    """Return (snippet_str_or_none, details_dict_or_none) for admin list."""
+    if det_raw is None:
+        return None, None
+    det = det_raw
+    if isinstance(det, str):
+        try:
+            det = json.loads(det)
+        except Exception:
+            s = det.strip()
+            return (s[:2000] + ("…" if len(s) > 2000 else "")), None
+    if not isinstance(det, dict):
+        s = str(det)
+        return (s[:2000] + ("…" if len(s) > 2000 else "")), None
+    if include_outputs:
+        return None, det
+    thin = {k: det[k] for k in ("metric", "error", "note", "warnings") if k in det}
+    if "detailed_scores" in det and not include_outputs:
+        thin["detailed_scores"] = det.get("detailed_scores")
+    try:
+        raw = json.dumps(thin, ensure_ascii=False, default=str)
+    except Exception:
+        raw = str(thin)
+    if len(raw) > 2000:
+        raw = raw[:2000] + "…"
+    return raw, None
+
+
+@app.get("/api/admin/submissions")
+@require_admin
+def admin_list_submissions():
+    """List all submissions for moderation (``LEADERBOARD_ADMIN_API_KEYS``)."""
+    dataset = (request.args.get("dataset") or "").strip() or None
+    submitter_q = (request.args.get("submitter_id") or "").strip() or None
+    raw_from = request.args.get("from")
+    raw_to = request.args.get("to")
+    date_from = _parse_iso_datetime(raw_from) if raw_from else None
+    date_to = _parse_iso_datetime(raw_to) if raw_to else None
+    include_outputs = (request.args.get("include_outputs") or "").lower() in {"1", "true", "yes"}
+    page = max(1, int(request.args.get("page", 1)))
+    page_size = min(200, max(1, int(request.args.get("page_size", 25))))
+    offset = (page - 1) * page_size
+    cursor_token = (request.args.get("cursor") or "").strip()
+    use_cursor = bool(cursor_token)
+    anchor_c = None
+    anchor_id = None
+    if use_cursor:
+        cd = decode_cursor(cursor_token)
+        dec = my_submissions_cursor_decode(cd) if cd else None
+        if not dec:
+            return jsonify({"success": False, "error": "Invalid cursor"}), 400
+        c_iso, anchor_id = dec
+        anchor_c = _parse_iso_datetime(c_iso)
+        if anchor_c is None:
+            return jsonify({"success": False, "error": "Invalid cursor"}), 400
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            where = ["1=1"]
+            params_base: list = []
+            if dataset:
+                where.append("bd.name = %s")
+                params_base.append(dataset)
+            if submitter_q:
+                where.append("(ms.submitter_id = %s OR ms.submitted_by = %s)")
+                params_base.extend([submitter_q, submitter_q])
+            if date_from:
+                where.append("ms.created >= %s")
+                params_base.append(date_from)
+            if date_to:
+                where.append("ms.created <= %s")
+                params_base.append(date_to)
+            cur_sql = ""
+            cur_params: list = []
+            if use_cursor:
+                cur_sql = " AND ((ms.created < %s) OR (ms.created = %s AND ms.id < %s))"
+                cur_params = [anchor_c, anchor_c, anchor_id]
+            where_sql = " AND ".join(where)
+
+            count_q = (
+                "SELECT COUNT(*) AS n FROM model_submissions ms "
+                "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                f"WHERE {where_sql}"
+            )
+            cursor.execute(count_q, tuple(params_base))
+            total = int((cursor.fetchone() or {}).get("n", 0))
+
+            mr_col = "ms.model_results" if include_outputs else "NULL AS model_results"
+            base = (
+                f"SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, "
+                f"bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details, {mr_col} "
+                "FROM model_submissions ms "
+                "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                f"WHERE {where_sql}{cur_sql} "
+                "ORDER BY ms.created DESC, ms.id DESC "
+            )
+            lim_params: list = [page_size]
+            if not use_cursor:
+                base += "LIMIT %s OFFSET %s"
+                lim_params.append(offset)
+            else:
+                base += "LIMIT %s"
+            cursor.execute(base, tuple(params_base + cur_params + lim_params))
+            rows = cursor.fetchall()
+            items = []
+            for r in rows:
+                det_raw = r.get("evaluation_details")
+                snip, _ = _evaluation_snippet_and_body(det_raw, include_outputs)
+                row_out = {
+                    "submission_id": r["id"],
+                    "dataset_name": r["dataset_name"],
+                    "task_type": r.get("task_type"),
+                    "model_name": r["model_name"],
+                    "submitted_by": r.get("submitted_by"),
+                    "submitter_id": r.get("submitter_id"),
+                    "score": float(r["score"]),
+                    "created": r["created"].isoformat() if r.get("created") else None,
+                    "evaluation_snippet": snip,
+                }
+                if include_outputs:
+                    ed = det_raw
+                    if isinstance(ed, str):
+                        try:
+                            ed = json.loads(ed)
+                        except Exception:
+                            ed = {"raw": ed}
+                    row_out["evaluation_details"] = ed if isinstance(ed, dict) else {"raw": ed}
+                    mr = r.get("model_results")
+                    if isinstance(mr, str):
+                        try:
+                            mr = json.loads(mr)
+                        except Exception:
+                            pass
+                    row_out["model_results"] = mr
+                items.append(row_out)
+            out = {
+                "success": True,
+                "submissions": items,
+                "page": page if not use_cursor else None,
+                "page_size": page_size,
+                "total": total,
+            }
+            adm_more = len(rows) == page_size and (use_cursor or offset + len(rows) < total)
+            if adm_more and rows:
+                lr = rows[-1]
+                ca = lr["created"].isoformat() if lr.get("created") else ""
+                out["next_cursor"] = my_submissions_cursor_encode(ca, int(lr["id"]))
+            return jsonify(out)
+        except Exception as e:
+            logger.exception("admin_submissions_db_failed", extra={"error": str(e)})
+            return jsonify({"success": False, "error": "Database error"}), 500
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    mem_raw = []
+    for ev in _STORE["evaluations"]:
+        sub_row = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
+        if not sub_row:
+            continue
+        dname = sub_row["benchmark_dataset_name"]
+        if dataset and dname != dataset:
+            continue
+        if submitter_q:
+            if sub_row.get("submitter_id") != submitter_q and sub_row.get("submitted_by") != submitter_q:
+                continue
+        cr = sub_row["created"]
+        if date_from and cr < date_from:
+            continue
+        if date_to and cr > date_to:
+            continue
+        det_raw = ev.get("evaluation_details")
+        snip, _ = _evaluation_snippet_and_body(det_raw, include_outputs)
+        mem_raw.append({
+            "submission_id": sub_row["id"],
+            "dataset_name": dname,
+            "task_type": None,
+            "model_name": sub_row["model_name"],
+            "submitted_by": sub_row.get("submitted_by"),
+            "submitter_id": sub_row.get("submitter_id"),
+            "score": float(ev["score"]),
+            "created": cr,
+            "evaluation_snippet": snip,
+            "_det_raw": det_raw,
+            "_model_results": sub_row.get("model_results") if include_outputs else None,
+            "_id": sub_row["id"],
+        })
+    mem_raw.sort(key=lambda x: (x["created"], x["_id"]), reverse=True)
+    total = len(mem_raw)
+    if use_cursor:
+        page_rows = []
+        for r in mem_raw:
+            if (r["created"] < anchor_c) or (r["created"] == anchor_c and r["_id"] < anchor_id):
+                page_rows.append(r)
+            if len(page_rows) >= page_size:
+                break
+    else:
+        page_rows = mem_raw[offset:offset + page_size]
+
+    items = []
+    for r in page_rows:
+        o = {
+            "submission_id": r["submission_id"],
+            "dataset_name": r["dataset_name"],
+            "task_type": r["task_type"],
+            "model_name": r["model_name"],
+            "submitted_by": r["submitted_by"],
+            "submitter_id": r["submitter_id"],
+            "score": r["score"],
+            "created": r["created"].isoformat() if r.get("created") else None,
+            "evaluation_snippet": r["evaluation_snippet"],
+        }
+        if include_outputs:
+            ed = r["_det_raw"]
+            if isinstance(ed, str):
+                try:
+                    ed = json.loads(ed)
+                except Exception:
+                    ed = {"raw": ed}
+            o["evaluation_details"] = ed if isinstance(ed, dict) else {"raw": ed}
+            o["model_results"] = r["_model_results"]
+        items.append(o)
+    out = {
+        "success": True,
+        "submissions": items,
+        "page": page if not use_cursor else None,
+        "page_size": page_size,
+        "total": total,
+    }
+    adm_more = len(page_rows) == page_size and (use_cursor or offset + page_size < total)
+    if adm_more and page_rows:
+        last = page_rows[-1]
+        out["next_cursor"] = my_submissions_cursor_encode(last["created"].isoformat(), int(last["_id"]))
+    return jsonify(out)
 
 
 @app.get("/public/submissions/<int:submission_id>")
@@ -1236,6 +1730,58 @@ def list_task_metrics(task_type):
     return jsonify({"success": True, "task_type": task_type, "metrics": metrics_for_task(task_type)})
 
 
+@app.get("/public/auth/google/start")
+def google_oauth_start():
+    """Begin Google OAuth (requires ``GOOGLE_CLIENT_ID`` and Authlib)."""
+    if _OAUTH is None:
+        return jsonify({"success": False, "error": "OAuth not configured"}), 501
+    redirect_uri = os.getenv("LEADERBOARD_OAUTH_REDIRECT_URI", "").strip()
+    if not redirect_uri:
+        redirect_uri = request.url_root.rstrip("/") + "/public/auth/google/callback"
+    return _OAUTH.google.authorize_redirect(redirect_uri)
+
+
+@app.get("/public/auth/google/callback")
+def google_oauth_callback():
+    """OAuth callback: mint HS256 JWT (``LEADERBOARD_JWT_SECRET``) and redirect to the SPA."""
+    if _OAUTH is None:
+        return jsonify({"success": False, "error": "OAuth not configured"}), 501
+    secret = os.getenv("LEADERBOARD_JWT_SECRET", "").strip()
+    if not secret:
+        return jsonify({"success": False, "error": "LEADERBOARD_JWT_SECRET required for OAuth login"}), 500
+    try:
+        token = _OAUTH.google.authorize_access_token()
+    except Exception as e:
+        logger.warning("google_oauth_failed", extra={"error": str(e)})
+        return jsonify({"success": False, "error": "OAuth authorization failed"}), 400
+    try:
+        ui = token.get("userinfo")
+        if not ui:
+            resp = _OAUTH.google.get("https://www.googleapis.com/oauth2/v3/userinfo", token=token)
+            ui = resp.json()
+        sub = (ui.get("email") or ui.get("sub") or "").strip()
+    except Exception as e:
+        logger.warning("google_userinfo_failed", extra={"error": str(e)})
+        return jsonify({"success": False, "error": "Could not read Google profile"}), 400
+    if not sub:
+        return jsonify({"success": False, "error": "No user identifier from Google"}), 400
+    try:
+        import jwt as pyjwt
+
+        body = {
+            "sub": sub[:255],
+            "exp": int((utc_now() + timedelta(hours=24)).timestamp()),
+        }
+        jwt_token = pyjwt.encode(body, secret, algorithm="HS256")
+        if isinstance(jwt_token, bytes):
+            jwt_token = jwt_token.decode("ascii")
+    except Exception as e:
+        logger.exception("jwt_issue_failed", extra={"error": str(e)})
+        return jsonify({"success": False, "error": "Token issue failed"}), 500
+    front = os.getenv("LEADERBOARD_FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    return redirect(f"{front}/oauth/callback#access_token={quote(jwt_token, safe='')}")
+
+
 @app.get('/openapi.json')
 def openapi_spec():
     """Small OpenAPI document for public integration endpoints."""
@@ -1255,18 +1801,19 @@ def openapi_spec():
     }
     return jsonify({
         "openapi": "3.0.3",
-        "info": {"title": "Anote Leaderboard API", "version": "0.3.0"},
+        "info": {"title": "Anote Leaderboard API", "version": "0.4.0"},
         "components": {
             "securitySchemes": {
                 "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
                 "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+                "AdminKeyAuth": {"type": "apiKey", "in": "header", "name": "X-Admin-Key"},
             }
         },
         "paths": {
             "/public/datasets": {"get": {"summary": "List public datasets"}},
-            "/public/add_dataset": {"post": {"summary": "Create a public dataset", "security": [{"ApiKeyAuth": []}]}},
-            "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split", "security": [{"ApiKeyAuth": []}]}},
-            "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source", "security": [{"ApiKeyAuth": []}]}},
+            "/public/add_dataset": {"post": {"summary": "Create a public dataset", "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}]}},
+            "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split", "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}]}},
+            "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source", "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}]}},
             "/public/submission_format": {
                 "get": {
                     "summary": "Expected submit_model JSON for a dataset",
@@ -1276,7 +1823,7 @@ def openapi_spec():
             "/public/submit_model": {
                 "post": {
                     "summary": "Submit model outputs for evaluation",
-                    "security": [{"ApiKeyAuth": []}],
+                    "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}],
                     "requestBody": {"content": {"application/json": {"schema": submit_schema}}},
                     "responses": {
                         "200": {"description": "Sync result", "content": {"application/json": {"schema": {"type": "object"}}}},
@@ -1292,6 +1839,12 @@ def openapi_spec():
                         {"name": "submitter_id", "in": "query", "schema": {"type": "string"}},
                         {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}},
                         {"name": "page_size", "in": "query", "schema": {"type": "integer", "default": 25}},
+                        {
+                            "name": "cursor",
+                            "in": "query",
+                            "schema": {"type": "string"},
+                            "description": "Opaque keyset cursor; when set, page is ignored. Sort: created DESC, id DESC.",
+                        },
                     ],
                 }
             },
@@ -1304,14 +1857,45 @@ def openapi_spec():
             "/public/get_leaderboard": {
                 "get": {
                     "summary": "Get leaderboard rows",
+                    "description": "Sort: dataset_name ASC, score DESC, submission_id DESC. Offset via page, or keyset via cursor (cursor ignores page).",
                     "parameters": [
                         {"name": "dataset", "in": "query", "schema": {"type": "string"}},
                         {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}},
                         {"name": "page_size", "in": "query", "schema": {"type": "integer", "default": 25}},
+                        {"name": "limit", "in": "query", "schema": {"type": "integer"}, "description": "Alias for page_size"},
+                        {
+                            "name": "cursor",
+                            "in": "query",
+                            "schema": {"type": "string"},
+                            "description": "Opaque keyset cursor; response may include next_cursor",
+                        },
                     ],
                 }
             },
-            "/public/export/leaderboard": {"get": {"summary": "Export leaderboard rows as CSV or JSON"}},
+            "/public/export/leaderboard": {
+                "get": {
+                    "summary": "Export leaderboard rows as CSV or JSON",
+                    "description": "CSV includes primary_metric and detailed_scores_json; walks all pages via cursor internally.",
+                }
+            },
+            "/public/auth/google/start": {"get": {"summary": "Redirect to Google OAuth (optional; requires Authlib + GOOGLE_CLIENT_ID)"}},
+            "/public/auth/google/callback": {"get": {"summary": "OAuth callback; redirects to LEADERBOARD_FRONTEND_URL/oauth/callback#access_token=…"}},
+            "/api/admin/submissions": {
+                "get": {
+                    "summary": "Admin: list submissions (moderation)",
+                    "security": [{"AdminKeyAuth": []}],
+                    "parameters": [
+                        {"name": "dataset", "in": "query", "schema": {"type": "string"}},
+                        {"name": "submitter_id", "in": "query", "schema": {"type": "string"}},
+                        {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                        {"name": "to", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                        {"name": "page", "in": "query", "schema": {"type": "integer"}},
+                        {"name": "page_size", "in": "query", "schema": {"type": "integer"}},
+                        {"name": "cursor", "in": "query", "schema": {"type": "string"}},
+                        {"name": "include_outputs", "in": "query", "schema": {"type": "string"}, "description": "1/true to include full evaluation_details and model_results"},
+                    ],
+                }
+            },
             "/api/metrics": {"get": {"summary": "List metric metadata"}},
             "/api/metrics/task/{task_type}": {"get": {"summary": "List metrics for a task type"}},
         },
@@ -1427,32 +2011,60 @@ def ingest_dataset():
 
 @app.get('/public/export/leaderboard')
 def export_leaderboard():
-    """Export leaderboard rows as CSV or JSON."""
+    """Export leaderboard rows as CSV or JSON (follows keyset cursors until exhausted)."""
     dataset_name = request.args.get("dataset")
     export_format = (request.args.get("format") or "json").lower()
-    with app.test_request_context(
-        "/public/get_leaderboard",
-        query_string={
-            "dataset": dataset_name or "",
-            "page": "1",
-            "page_size": "100",
-        },
-    ):
-        payload = get_leaderboard().get_json()
-    rows = payload.get("leaderboard", []) if payload else []
+    rows = []
+    next_cur = None
+    while True:
+        qs: dict = {"page_size": "100"}
+        if dataset_name:
+            qs["dataset"] = dataset_name
+        if next_cur:
+            qs["cursor"] = next_cur
+        with app.test_request_context("/public/get_leaderboard", query_string=qs):
+            payload = get_leaderboard().get_json()
+        if not payload or not payload.get("success"):
+            break
+        chunk = payload.get("leaderboard") or []
+        rows.extend(chunk)
+        next_cur = payload.get("next_cursor")
+        if not next_cur:
+            break
     if export_format == "json":
         return jsonify(rows)
     if export_format != "csv":
         return jsonify({"success": False, "error": "format must be csv or json"}), 400
 
     out = StringIO()
-    writer = csv.DictWriter(
-        out,
-        fieldnames=["rank", "dataset_name", "model_name", "submitted_by", "score", "evaluation_metric", "submitted_at"],
-    )
+    fieldnames = [
+        "rank",
+        "submission_id",
+        "dataset_name",
+        "model_name",
+        "submitted_by",
+        "score",
+        "evaluation_metric",
+        "primary_metric",
+        "detailed_scores_json",
+        "submitted_at",
+    ]
+    writer = csv.DictWriter(out, fieldnames=fieldnames)
     writer.writeheader()
     for row in rows:
-        writer.writerow({field: row.get(field) for field in writer.fieldnames})
+        ds = row.get("detailed_scores")
+        writer.writerow({
+            "rank": row.get("rank"),
+            "submission_id": row.get("submission_id"),
+            "dataset_name": row.get("dataset_name"),
+            "model_name": row.get("model_name"),
+            "submitted_by": row.get("submitted_by"),
+            "score": row.get("score"),
+            "evaluation_metric": row.get("evaluation_metric"),
+            "primary_metric": row.get("primary_metric"),
+            "detailed_scores_json": json.dumps(ds, ensure_ascii=False, default=str) if ds is not None else "",
+            "submitted_at": row.get("submitted_at"),
+        })
     filename = f"leaderboard-{dataset_name or 'all'}.csv"
     return Response(
         out.getvalue(),

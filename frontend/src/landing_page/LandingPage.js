@@ -19,27 +19,28 @@ import Evaluations  from "./landing_page_components/Evaluations"
 import AdminLeaderboardManager from "./landing_page_components/AdminLeaderboardManager";
 import AddDataset from "./landing_page_components/AddDataset";
 import DatasetDetails from "./landing_page_components/DatasetDetails";
-import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, evaluationsPath, csvBenchmarksPath, addDatasetPath } from "../constants/RouteConstants";
+import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, evaluationsPath, csvBenchmarksPath, addDatasetPath, loginPath, oauthCallbackPath } from "../constants/RouteConstants";
 import MySubmissions from "./landing_page_components/MySubmissions";
 import HeaderBar from "./landing_page_components/HeaderBar";
 import CsvBenchmarksDemo from "./landing_page_components/CsvBenchmarksDemo";
+import AuthGuard from "./landing_page_components/AuthGuard";
+import LoginPage from "./landing_page_components/LoginPage";
+import OAuthCallback from "./landing_page_components/OAuthCallback";
 
 function LandingPage() {
   const location = useLocation();
   let dispatch = useDispatch();
 
-  const [isLoggedIn, setIsLoggedIn] = useState(true);
-  const accessToken = localStorage.getItem("accessToken");
-  const sessionToken = localStorage.getItem("sessionToken");
-  if (accessToken || sessionToken) {
-    if (!isLoggedIn) {
-      setIsLoggedIn(true);
-    }
-  } else {
-    if (isLoggedIn) {
-      setIsLoggedIn(false);
-    }
-  }
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const accessToken = localStorage.getItem("accessToken");
+    const sessionToken = localStorage.getItem("sessionToken");
+    const apiKey = localStorage.getItem("leaderboard_api_key");
+    const jwt = sessionStorage.getItem("lb_jwt");
+    setIsLoggedIn(!!(accessToken || sessionToken || (apiKey && apiKey.trim()) || jwt));
+  }, [location.pathname]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -69,13 +70,15 @@ function LandingPage() {
       <div className="pt-14">
         <Routes>
           <Route index element={<Leaderboard />} />,
-          <Route path={submittoleaderboardPath} index element={<SubmitToLeaderboard />} />,
-          <Route path={mySubmissionsPath} index element={<MySubmissions />} />,
+          <Route path={loginPath} element={<LoginPage />} />,
+          <Route path={oauthCallbackPath} element={<OAuthCallback />} />,
+          <Route path={submittoleaderboardPath} index element={<AuthGuard><SubmitToLeaderboard /></AuthGuard>} />,
+          <Route path={mySubmissionsPath} index element={<AuthGuard><MySubmissions /></AuthGuard>} />,
           <Route path={evaluationsPath} index element={<Evaluations />} />,
           <Route path={csvBenchmarksPath} index element={<CsvBenchmarksDemo />} />,
           <Route path={addDatasetPath} index element={<AddDataset />} />,
           <Route path="/dataset/:name" element={<DatasetDetails />} />,
-          <Route path={adminLeaderboardPath} index element={<AdminLeaderboardManager />} />,
+          <Route path={adminLeaderboardPath} index element={<AuthGuard><AdminLeaderboardManager /></AuthGuard>} />,
           <Route path="*" element={<Navigate replace to="/" />} />
         </Routes>
       </div>

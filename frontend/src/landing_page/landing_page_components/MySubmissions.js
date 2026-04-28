@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 import { submittoleaderboardPath } from "../../constants/RouteConstants";
+import { getLeaderboardJwt } from "../../utils/leaderboardAuth";
 
 const API_BASE =
   process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
@@ -26,16 +27,19 @@ const MySubmissions = () => {
     setLoading(true);
     setError("");
     try {
-      if (!submitterId.trim()) {
+      const jwt = getLeaderboardJwt();
+      if (!submitterId.trim() && !jwt) {
         setRows([]);
         setTotal(0);
-        setError("Set a submitter id (same as on Submit page) or use JWT on the API.");
+        setError("Set a submitter id (same as on Submit page) or sign in so the API receives your JWT.");
         setLoading(false);
         return;
       }
-      const qs = new URLSearchParams({ submitter_id: submitterId.trim(), page: "1", page_size: "50" });
+      const qs = new URLSearchParams({ page: "1", page_size: "50" });
+      if (submitterId.trim()) qs.set("submitter_id", submitterId.trim());
       const headers = {};
       if (apiKey.trim()) headers["X-API-Key"] = apiKey.trim();
+      if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
       const res = await fetch(`${API_BASE}/public/my_submissions?${qs}`, { headers });
       const data = await res.json();
       if (!res.ok || data.success !== true) {
@@ -70,8 +74,8 @@ const MySubmissions = () => {
           </button>
         </div>
         <p className="text-sm text-gray-400 mb-4">
-          Lists rows where <code className="text-gray-300">submitter_id</code> matches your submissions (set on the Submit page or via JWT{" "}
-          <code className="text-gray-300">sub</code> claim when using the API).
+          Lists rows for your account: either sign in (Bearer <code className="text-gray-300">sub</code> from the session JWT) or set a{" "}
+          <code className="text-gray-300">submitter_id</code> that matches your submissions.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           <input

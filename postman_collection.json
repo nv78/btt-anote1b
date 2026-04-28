@@ -1,0 +1,51 @@
+{
+  "info": {
+    "name": "Anote Leaderboard (minimal)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5001" },
+    { "key": "apiKey", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "OpenAPI",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/openapi.json"
+      }
+    },
+    {
+      "name": "get_leaderboard",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/public/get_leaderboard?page=1&page_size=25"
+      }
+    },
+    {
+      "name": "submit_model",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-Key", "value": "{{apiKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"benchmarkDatasetName\": \"flores_spanish_translation\",\n  \"modelName\": \"example-model\",\n  \"modelResults\": [\"Traducción 1\", \"Traducción 2\", \"Traducción 3\"],\n  \"sentence_ids\": [0, 1, 2]\n}"
+        },
+        "url": "{{baseUrl}}/public/submit_model"
+      }
+    }
+  ]
+}
