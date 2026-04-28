@@ -164,10 +164,15 @@ def validate_metadata(value):
 
 
 def require_api_key(fn):
-    """Writes: ``X-API-Key`` in ``LEADERBOARD_API_KEYS`` or Bearer JWT when ``LEADERBOARD_JWT_SECRET`` is set."""
+    """Writes: ``X-API-Key`` in ``LEADERBOARD_API_KEYS`` or Bearer JWT with ``sub`` (HS256 or Anote JWKS)."""
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        try:
+            from auth_helpers import decode_leaderboard_bearer_token
+        except ImportError:
+            from backend.auth_helpers import decode_leaderboard_bearer_token  # type: ignore
+
         configured = [key.strip() for key in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if key.strip()]
         require_key = os.getenv("REQUIRE_API_KEY", "").lower() in {"1", "true", "yes"} or bool(configured)
         if not require_key:
@@ -175,17 +180,11 @@ def require_api_key(fn):
         supplied = request.headers.get("X-API-Key", "")
         if supplied in configured:
             return fn(*args, **kwargs)
-        secret = os.getenv("LEADERBOARD_JWT_SECRET", "").strip()
-        if secret:
-            auth = request.headers.get("Authorization", "") or ""
-            if auth.startswith("Bearer "):
-                try:
-                    import jwt  # PyJWT
-
-                    jwt.decode(auth[7:].strip(), secret, algorithms=["HS256"])
-                    return fn(*args, **kwargs)
-                except Exception:
-                    pass
+        auth = request.headers.get("Authorization", "") or ""
+        if auth.startswith("Bearer "):
+            payload = decode_leaderboard_bearer_token(auth[7:].strip())
+            if payload and str(payload.get("sub", "")).strip():
+                return fn(*args, **kwargs)
         logger.warning("unauthorized_write", extra={"endpoint": request.path, "ip": request.remote_addr})
         return jsonify({"success": False, "error": "Unauthorized"}), 401
 
@@ -1805,7 +1804,12 @@ def openapi_spec():
         "components": {
             "securitySchemes": {
                 "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
-                "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+                "BearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT",
+                    "description": "JWT with required sub claim; HS256 (LEADERBOARD_JWT_SECRET) or JWKS (ANOTE_JWKS_URL).",
+                },
                 "AdminKeyAuth": {"type": "apiKey", "in": "header", "name": "X-Admin-Key"},
             }
         },

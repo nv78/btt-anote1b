@@ -93,8 +93,15 @@ Notes
 - `POST /api/datasets/ingest`: ingestion-compatible alias for Hugging Face imports.
 - `GET /public/export/leaderboard?format=csv|json`: export leaderboard rows.
 
+Pagination (leaderboard and my submissions):
+- Prefer `cursor` (opaque keyset) for stable paging; when `cursor` is set, `page` is ignored.
+- Responses may include `next_cursor` when another page may exist.
+
 Optional write protection:
 - Set `LEADERBOARD_API_KEYS=key1,key2` to require `X-API-Key` on write/evaluation endpoints.
+- Or use `Authorization: Bearer <jwt>` with a **non-empty `sub` claim**: either HS256 using `LEADERBOARD_JWT_SECRET` (e.g. after Google OAuth callback) or RS256/ES256 via **`ANOTE_JWKS_URL`** (optional `ANOTE_ISSUER`, `ANOTE_AUDIENCE`) for tokens minted by the main Anote app.
+- Google sign-in (optional): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LEADERBOARD_OAUTH_REDIRECT_URI`, `LEADERBOARD_FRONTEND_URL`, `FLASK_SECRET_KEY`, and `LEADERBOARD_JWT_SECRET` for issued session JWTs.
+- Admin moderation: set `LEADERBOARD_ADMIN_API_KEYS` and call `GET /api/admin/submissions` with `X-Admin-Key` or `X-API-Key` matching those values only (separate from write keys).
 - Set per-endpoint rate limits with values such as `SUBMIT_MODEL_RATE_LIMIT=10/minute`.
 - Set `ALLOWED_ORIGINS` explicitly outside local development.
 

@@ -7,30 +7,70 @@ from typing import Any, Dict, Optional
 from flask import Request
 
 
-def jwt_sub_from_request(request: Request) -> Optional[str]:
-    """If LEADERBOARD_JWT_SECRET is set, validate Bearer token and return ``sub`` claim."""
-    secret = os.getenv("LEADERBOARD_JWT_SECRET", "").strip()
-    if not secret:
+def decode_leaderboard_bearer_token(token: str) -> Optional[Dict[str, Any]]:
+    """Validate Bearer JWT and return claims.
+
+    Order: if ``ANOTE_JWKS_URL`` is set, try RS256/ES256 via JWKS (optional ``ANOTE_ISSUER``, ``ANOTE_AUDIENCE``).
+    Else if ``LEADERBOARD_JWT_SECRET`` is set, try HS256 (e.g. OAuth callback–issued tokens).
+
+    A non-empty ``sub`` claim is required.
+    """
+    if not token or not isinstance(token, str):
         return None
+    try:
+        import jwt  # PyJWT
+    except ImportError:
+        return None
+    jwks_url = os.getenv("ANOTE_JWKS_URL", "").strip()
+    issuer = os.getenv("ANOTE_ISSUER", "").strip()
+    audience = os.getenv("ANOTE_AUDIENCE", "").strip()
+    if jwks_url:
+        try:
+            from jwt import PyJWKClient
+
+            jwks = PyJWKClient(jwks_url)
+            signing_key = jwks.get_signing_key_from_jwt(token)
+            kwargs: Dict[str, Any] = {
+                "algorithms": ["RS256", "ES256"],
+                "options": {"require": ["sub"]},
+            }
+            if issuer:
+                kwargs["issuer"] = issuer
+            if audience:
+                kwargs["audience"] = audience
+            return jwt.decode(token, signing_key.key, **kwargs)
+        except Exception:
+            pass
+    secret = os.getenv("LEADERBOARD_JWT_SECRET", "").strip()
+    if secret:
+        try:
+            return jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                options={"require": ["sub"]},
+            )
+        except Exception:
+            return None
+    return None
+
+
+def jwt_sub_from_request(request: Request) -> Optional[str]:
+    """Validate Bearer token (JWKS or HS256) and return ``sub``."""
     auth = request.headers.get("Authorization", "") or ""
     if not auth.startswith("Bearer "):
         return None
     token = auth[7:].strip()
     if not token:
         return None
-    try:
-        import jwt  # PyJWT
-    except ImportError:
+    payload = decode_leaderboard_bearer_token(token)
+    if not payload:
         return None
-    try:
-        payload: Dict[str, Any] = jwt.decode(token, secret, algorithms=["HS256"])
-        sub = payload.get("sub")
-        if sub is None:
-            return None
-        s = str(sub).strip()
-        return s[:255] if s else None
-    except Exception:
+    sub = payload.get("sub")
+    if sub is None:
         return None
+    s = str(sub).strip()
+    return s[:255] if s else None
 
 
 def resolve_submitter_id(request: Request, body: Optional[dict]) -> Optional[str]:
