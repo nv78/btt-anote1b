@@ -188,6 +188,7 @@ def index():
             "/health",
             "/public/datasets",
             "/public/get_source_sentences",
+            "/public/submission_format",
             "/public/submit_model",
             "/public/get_leaderboard",
             "/api/leaderboard/*"
@@ -283,6 +284,52 @@ def get_source_sentences():
         "source_sentences": selected,
         "count": len(selected),
     })
+
+
+@app.get('/public/submission_format')
+def submission_format():
+    """Return expected POST /public/submit_model JSON shape for a dataset name."""
+    raw = request.args.get("dataset") or request.args.get("benchmarkDatasetName")
+    if not raw:
+        return jsonify({"success": False, "error": "Missing query parameter: dataset or benchmarkDatasetName"}), 400
+    try:
+        name = validate_text(raw, "dataset")
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    dataset = None
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT name, task_type, evaluation_metric, reference_data FROM benchmark_datasets "
+                "WHERE name = %s AND active = TRUE",
+                (name,),
+            )
+            dataset = cursor.fetchone()
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    if not dataset:
+        dataset = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+    if not dataset:
+        return jsonify({"success": False, "error": "Dataset not found"}), 404
+
+    try:
+        from eval_core.leaderboard_bridge import submission_format_for_dataset  # type: ignore
+    except ImportError:
+        from backend.eval_core.leaderboard_bridge import submission_format_for_dataset  # type: ignore
+
+    payload = submission_format_for_dataset(
+        dataset.get("name", name),
+        dataset.get("task_type"),
+        dataset.get("evaluation_metric"),
+        dataset.get("reference_data"),
+    )
+    return jsonify(payload)
 
 
 @app.get('/public/get_leaderboard')
@@ -912,6 +959,7 @@ def openapi_spec():
             "/public/add_dataset": {"post": {"summary": "Create a public dataset"}},
             "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split"}},
             "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source"}},
+            "/public/submission_format": {"get": {"summary": "Expected submit_model JSON for a dataset"}},
             "/public/submit_model": {"post": {"summary": "Submit model outputs for evaluation"}},
             "/public/get_leaderboard": {
                 "get": {

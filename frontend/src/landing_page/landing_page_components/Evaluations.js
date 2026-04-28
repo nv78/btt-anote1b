@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { addDatasetPath, csvBenchmarksPath, submittoleaderboardPath } from "../../constants/RouteConstants";
+import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || process.env.REACT_APP_BACK_END_HOST || "http://localhost:5001";
 
@@ -44,7 +45,9 @@ const Evaluations = () => {
             groupedData[key].models.push({
               model: submission.model_name,
               score: submission.score,
-              updated: new Date(submission.submitted_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+              updated: new Date(submission.submitted_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+              primary_metric: submission.primary_metric,
+              detailed_scores: submission.detailed_scores,
             });
           });
 
@@ -190,7 +193,7 @@ const Evaluations = () => {
 
             {/* Rankings table */}
             <div className="flex-1">
-              <div className="grid grid-cols-[3rem_1fr_6rem] text-[10px] font-semibold uppercase tracking-widest text-gray-600 px-5 py-2.5 border-b border-gray-800/40">
+              <div className="grid grid-cols-[3rem_1fr_7rem] text-[10px] font-semibold uppercase tracking-widest text-gray-600 px-5 py-2.5 border-b border-gray-800/40">
                 <div>Rank</div>
                 <div>Model</div>
                 <div className="text-right">Score</div>
@@ -200,11 +203,12 @@ const Evaluations = () => {
                   const isTop = m.rank === 1;
                   const score = typeof m.score === 'number' ? m.score.toFixed(3) : m.score;
                   const rankEmoji = m.rank === 1 ? '🥇' : m.rank === 2 ? '🥈' : m.rank === 3 ? '🥉' : null;
+                  const metricsLine = formatMetricsSummary(m.detailed_scores);
                   return (
                     <div
                       key={m.rank}
                       className={[
-                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-2.5 text-sm transition-colors",
+                        "grid grid-cols-[3rem_1fr_7rem] items-center px-5 py-2.5 text-sm transition-colors",
                         isTop ? "bg-[#defe47]/[0.04] hover:bg-[#defe47]/[0.07]" : "hover:bg-white/[0.03]"
                       ].join(' ')}
                     >
@@ -214,13 +218,21 @@ const Evaluations = () => {
                           : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-800 text-[11px] text-gray-500 tabular-nums font-mono">{m.rank}</span>
                         }
                       </div>
-                      <div className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')} title={m.model}>
-                        {m.model}
+                      <div className="min-w-0">
+                        <div className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')} title={m.model}>
+                          {m.model}
+                        </div>
+                        {metricsLine && (
+                          <div className="text-[10px] text-gray-500 mt-0.5 truncate font-mono" title={metricsLine}>{metricsLine}</div>
+                        )}
                       </div>
                       <div className="text-right">
                         <span className={["tabular-nums font-semibold", isTop ? "text-[#defe47]" : m.rank === 2 ? "text-gray-100" : "text-gray-400"].join(' ')}>
                           {score}
                         </span>
+                        {m.primary_metric && (
+                          <div className="text-[10px] text-gray-600 leading-none mt-0.5">{m.primary_metric}</div>
+                        )}
                       </div>
                     </div>
                   );

@@ -4,6 +4,7 @@ ground_truth + predictions shapes, run evaluators, resolve primary score.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from eval_core.evaluators import get_evaluator
@@ -179,4 +180,68 @@ def recipe_payload_to_benchmark_import(recipe: Dict[str, Any]) -> Dict[str, Any]
         "task_type": task,
         "evaluation_metric": primary,
         "reference_data": rd,
+    }
+
+
+def submission_format_for_dataset(
+    name: str,
+    task_type: Optional[str],
+    evaluation_metric: Optional[str],
+    reference_data: Any,
+) -> Dict[str, Any]:
+    """Describe POST /public/submit_model body shape for a stored benchmark dataset."""
+    rd: Dict[str, Any]
+    if isinstance(reference_data, str):
+        try:
+            parsed = json.loads(reference_data)
+            rd = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            rd = {}
+    elif isinstance(reference_data, dict):
+        rd = reference_data
+    else:
+        rd = {}
+
+    n = 0
+    for key in ("source_texts", "ground_truth", "labels", "answers", "entities", "reference_translations"):
+        v = rd.get(key)
+        if isinstance(v, list) and len(v) > n:
+            n = len(v)
+
+    task_norm = normalize_task_type(task_type)
+    metric_norm = normalize_eval_metric(evaluation_metric, task_norm)
+    example_ids = list(range(min(n, 4))) if n else [0, 1, 2]
+
+    placeholder_results: List[str] = []
+    for _ in example_ids:
+        if task_norm == "text_classification":
+            placeholder_results.append("<predicted_label>")
+        elif task_norm == "named_entity_recognition":
+            placeholder_results.append("ENTITY_ONE; ENTITY_TWO")
+        elif task_norm in ("document_qa", "line_qa"):
+            placeholder_results.append("<predicted_answer_text>")
+        else:
+            placeholder_results.append("<predicted_translation>")
+
+    return {
+        "success": True,
+        "benchmarkDatasetName": name,
+        "task_type": task_type,
+        "task_type_normalized": task_norm,
+        "evaluation_metric": evaluation_metric,
+        "evaluation_metric_normalized": metric_norm,
+        "dataset_size": n,
+        "reference_data_keys": sorted(rd.keys()),
+        "submit_model_body": {
+            "benchmarkDatasetName": name,
+            "modelName": "your-model-id",
+            "submittedBy": "you@example.com",
+            "sentence_ids": example_ids,
+            "modelResults": placeholder_results,
+            "metadata": {},
+        },
+        "notes": {
+            "sentence_ids": "Must be the same length as modelResults; indices into the dataset's reference_data (e.g. labels[i], answers[i]).",
+            "modelResults": "For NER, use semicolon-separated entity strings per example unless submitting structured lists.",
+        },
     }

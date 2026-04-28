@@ -2,6 +2,8 @@
 Comprehensive metrics information and documentation.
 
 Provides detailed explanations for all evaluation metrics used in the leaderboard.
+
+METRICS_CATALOG is aligned with Personal/metrics_info.py; metrics_for_task() here is the Flask helper.
 """
 
 METRICS_CATALOG = {

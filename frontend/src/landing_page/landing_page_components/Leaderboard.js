@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 import { useNavigate } from "react-router-dom";
+import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 
 const Leaderboard = () => {
   const [openIndex, setOpenIndex] = useState(null);
@@ -23,11 +24,17 @@ const Leaderboard = () => {
         const entries = Array.isArray(data.leaderboard) ? data.leaderboard : [];
         const grouped = entries.reduce((acc, e) => {
           const key = e.dataset_name || "Unknown Dataset";
-          if (!acc[key]) acc[key] = { name: key, evaluation_metric: e.evaluation_metric, models: [] };
+          if (!acc[key]) {
+            acc[key] = { name: key, evaluation_metric: e.evaluation_metric, task_type: e.task_type, models: [] };
+          } else if (e.task_type && !acc[key].task_type) {
+            acc[key].task_type = e.task_type;
+          }
           acc[key].models.push({
             model: e.model_name,
             score: typeof e.score === 'number' ? e.score : Number(e.score) || 0,
             updated: e.submitted_at ? new Date(e.submitted_at).toLocaleDateString() : "",
+            primary_metric: e.primary_metric,
+            detailed_scores: e.detailed_scores,
           });
           return acc;
         }, {});
@@ -1091,9 +1098,9 @@ const Leaderboard = () => {
                 <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>
                   {dataset.name}
                 </h2>
-                {dataset.evaluation_metric && (
+                {(dataset.task_type || dataset.evaluation_metric) && (
                   <span className="mt-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-800/80 text-[11px] text-gray-400 font-medium border border-gray-700/50">
-                    {dataset.evaluation_metric}
+                    {[dataset.task_type, dataset.evaluation_metric].filter(Boolean).join(" · ")}
                   </span>
                 )}
               </div>
@@ -1132,6 +1139,7 @@ const Leaderboard = () => {
                   const score = typeof model.score === 'number'
                     ? model.score.toFixed(model.score < 1 ? 3 : 2)
                     : model.score;
+                  const metricsLine = formatMetricsSummary(model.detailed_scores);
                   return (
                     <div
                       key={modelIndex}
@@ -1150,11 +1158,21 @@ const Leaderboard = () => {
                           </span>
                         )}
                       </div>
-                      <div
-                        className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')}
-                        title={model.model}
-                      >
-                        {model.model}
+                      <div className="min-w-0">
+                        <div
+                          className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')}
+                          title={model.model}
+                        >
+                          {model.model}
+                        </div>
+                        {metricsLine && (
+                          <div
+                            className="text-[10px] text-gray-500 mt-0.5 truncate font-mono"
+                            title={metricsLine}
+                          >
+                            {metricsLine}
+                          </div>
+                        )}
                       </div>
                       <div className="text-right">
                         <span className={[
@@ -1163,6 +1181,9 @@ const Leaderboard = () => {
                         ].join(' ')}>
                           {score}
                         </span>
+                        {model.primary_metric && (
+                          <div className="text-[10px] text-gray-600 leading-none mt-0.5">{model.primary_metric}</div>
+                        )}
                         {model.ci && (
                           <div className="text-[10px] text-gray-600 leading-none mt-0.5">{model.ci}</div>
                         )}

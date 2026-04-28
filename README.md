@@ -279,6 +279,23 @@ Leaderboard reads support pagination and dataset filtering:
 curl "http://localhost:5001/public/get_leaderboard?page=1&page_size=25&dataset=AG%20News%20Test%20Sample"
 ```
 
+### Submission payload shape
+
+For any dataset already registered (MySQL or in-memory), ask the API for a copy-paste JSON body:
+
+```bash
+curl "http://localhost:5001/public/submission_format?dataset=flores_spanish_translation"
+```
+
+The response includes `submit_model_body` (placeholder `modelResults` aligned with `sentence_ids`) plus normalized task and metric names. From the repo root:
+
+```bash
+chmod +x backend/scripts/submit_model_example.sh
+LEADERBOARD_API=http://127.0.0.1:5001 backend/scripts/submit_model_example.sh "Your Dataset Display Name"
+```
+
+Then `POST` that body (with real predictions) to `/public/submit_model`, including your API key header if the server enforces one.
+
 Exports are available as JSON or CSV:
 
 ```bash
