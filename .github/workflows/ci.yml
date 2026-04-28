@@ -1,3 +1,6 @@
+# Single CI entrypoint: backend tests + ruff + mkdocs; frontend lint + build.
+# (Legacy duplicate workflows backend-ci.yml / backend.yml were removed.)
+
 name: CI
 
 on:
@@ -16,7 +19,8 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -r backend/requirements.txt pytest ruff mkdocs-material
-      - run: python -m pytest backend/tests -q
+      - name: Pytest (backend/tests only; add backend/pytest if tests are moved there)
+        run: python -m pytest backend/tests -q
       - run: ruff check backend
       - run: mkdocs build --strict
 

@@ -17,9 +17,10 @@ import Leaderboard from "./landing_page_components/Leaderboard";
 import SubmitToLeaderboard  from "./landing_page_components/SubmitToLeaderboard";
 import Evaluations  from "./landing_page_components/Evaluations"
 import AdminLeaderboardManager from "./landing_page_components/AdminLeaderboardManager";
+import AdminSubmissionsModeration from "./landing_page_components/AdminSubmissionsModeration";
 import AddDataset from "./landing_page_components/AddDataset";
 import DatasetDetails from "./landing_page_components/DatasetDetails";
-import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, evaluationsPath, csvBenchmarksPath, addDatasetPath, loginPath, oauthCallbackPath } from "../constants/RouteConstants";
+import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, adminSubmissionsPath, evaluationsPath, csvBenchmarksPath, addDatasetPath, loginPath, oauthCallbackPath } from "../constants/RouteConstants";
 import MySubmissions from "./landing_page_components/MySubmissions";
 import HeaderBar from "./landing_page_components/HeaderBar";
 import CsvBenchmarksDemo from "./landing_page_components/CsvBenchmarksDemo";
@@ -79,6 +80,7 @@ function LandingPage() {
           <Route path={addDatasetPath} index element={<AddDataset />} />,
           <Route path="/dataset/:name" element={<DatasetDetails />} />,
           <Route path={adminLeaderboardPath} index element={<AuthGuard><AdminLeaderboardManager /></AuthGuard>} />,
+          <Route path={adminSubmissionsPath} index element={<AuthGuard><AdminSubmissionsModeration /></AuthGuard>} />,
           <Route path="*" element={<Navigate replace to="/" />} />
         </Routes>
       </div>

@@ -101,9 +101,35 @@ Optional write protection:
 - Set `LEADERBOARD_API_KEYS=key1,key2` to require `X-API-Key` on write/evaluation endpoints.
 - Or use `Authorization: Bearer <jwt>` with a **non-empty `sub` claim**: either HS256 using `LEADERBOARD_JWT_SECRET` (e.g. after Google OAuth callback) or RS256/ES256 via **`ANOTE_JWKS_URL`** (optional `ANOTE_ISSUER`, `ANOTE_AUDIENCE`) for tokens minted by the main Anote app.
 - Google sign-in (optional): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LEADERBOARD_OAUTH_REDIRECT_URI`, `LEADERBOARD_FRONTEND_URL`, `FLASK_SECRET_KEY`, and `LEADERBOARD_JWT_SECRET` for issued session JWTs.
-- Admin moderation: set `LEADERBOARD_ADMIN_API_KEYS` and call `GET /api/admin/submissions` with `X-Admin-Key` or `X-API-Key` matching those values only (separate from write keys).
+- Admin moderation: set `LEADERBOARD_ADMIN_API_KEYS` and call `GET /api/admin/submissions` with `X-Admin-Key` or `X-API-Key` matching those values only (separate from write keys). After signing in with an API key or JWT, the SPA can open **`/leaderboard/admin/submissions`** to query this endpoint.
 - Set per-endpoint rate limits with values such as `SUBMIT_MODEL_RATE_LIMIT=10/minute`.
 - Set `ALLOWED_ORIGINS` explicitly outside local development.
+
+### Production deployment checklist
+
+1. **Branch / PR**: merge the Leaderboard changes to your default branch; tag releases as needed.
+2. **Secrets**: set strong values for `FLASK_SECRET_KEY`, `LEADERBOARD_JWT_SECRET`, `LEADERBOARD_API_KEYS` (if used), and `LEADERBOARD_ADMIN_API_KEYS` (comma-separated). Never reuse admin keys as write keys.
+3. **CORS**: set `ALLOWED_ORIGINS` to your real frontend origin(s); `FLASK_ENV=production` requires it (see [`app.py`](Leaderboard/backend/app.py)).
+4. **Google OAuth** (if enabled): create OAuth client; authorized redirect URI must match `LEADERBOARD_OAUTH_REDIRECT_URI` (backend callback). Set `LEADERBOARD_FRONTEND_URL` to the SPA origin used in the post-login redirect.
+5. **Anote JWT** (if used): configure `ANOTE_JWKS_URL` and optional `ANOTE_ISSUER` / `ANOTE_AUDIENCE` so Bearer tokens from the main app validate with a non-empty `sub`.
+6. **TLS & proxy**: terminate TLS at your reverse proxy; if the app sits behind a proxy, ensure `LEADERBOARD_OAUTH_REDIRECT_URI` uses the public HTTPS URL the browser hits.
+7. **Smoke tests**: `GET /health`, `GET /openapi.json`, contributor login flow, `GET /api/admin/submissions` with `X-Admin-Key`, and a write with API key or Bearer.
+
+See [`backend/.env.example`](Leaderboard/backend/.env.example) for variable names.
+
+### Tests and CI
+
+- Tests live in [`backend/tests`](Leaderboard/backend/tests). From `Leaderboard/backend`: `PYTHONPATH=. pytest -q`.
+- CI: [`.github/workflows/ci.yml`](Leaderboard/.github/workflows/ci.yml) runs backend pytest, Ruff, MkDocs, and frontend lint/build.
+
+### Deferred roadmap (Phase 3 and later)
+
+Not scheduled in the current milestone; track when prioritizing product work:
+
+- **Verified submitter**: `submitted_by_verified` (or similar) on leaderboard rows tied to IdP / email verification.
+- **Compare two runs** in the UI (side-by-side submissions or scores).
+- **Stricter submit UX**: task-specific wizards, JSON upload polish.
+- **Metrics & infra**: COMET, LLM-as-judge, calibration; **Redis/Celery** for durable eval queues; HF idempotent upsert; frozen SOTA rows; live runner with cost caps.
 
 ---
 

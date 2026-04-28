@@ -2,6 +2,7 @@ export const leaderboardPath = "/leaderboard";
 export const submittoleaderboardPath = "/submit";
 export const mySubmissionsPath = "/my-submissions";
 export const adminLeaderboardPath = "/leaderboard/admin";
+export const adminSubmissionsPath = "/leaderboard/admin/submissions";
 export const loginPath = "/login";
 export const oauthCallbackPath = "/oauth/callback";
 export const evaluationsPath = "/evaluations";

@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LeaderboardSDK } from '../../lib/leaderboardSdk';
+import { adminSubmissionsPath } from '../../constants/RouteConstants';
 
 const AdminLeaderboardManager = () => {
+  const navigate = useNavigate();
   const [dsForm, setDsForm] = useState({ name: '', url: '', task_type: '', description: '' });
   const [dsSubmitting, setDsSubmitting] = useState(false);
   const [dsResult, setDsResult] = useState(null);
@@ -72,6 +75,13 @@ const AdminLeaderboardManager = () => {
       <header className="w-full max-w-5xl mt-10 pt-10 text-center">
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-white">Manage Leaderboard</h1>
         <p className="mt-3 text-gray-300/90 text-sm md:text-base">Add datasets and models to the curated leaderboard.</p>
+        <button
+          type="button"
+          onClick={() => navigate(adminSubmissionsPath)}
+          className="mt-4 text-sm px-4 py-2 rounded-lg border border-amber-500/50 text-amber-200 hover:bg-amber-500/10"
+        >
+          All submissions (moderation API)
+        </button>
       </header>
 
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">

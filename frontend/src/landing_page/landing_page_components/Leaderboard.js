@@ -34,6 +34,8 @@ const Leaderboard = () => {
   const [liveEntries, setLiveEntries] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [liveDatasetFilter, setLiveDatasetFilter] = useState("");
+  const [datasetOptions, setDatasetOptions] = useState([]);
   const [curatedDatasets, setCuratedDatasets] = useState([]);
   const [viewMode, setViewMode] = useState('live'); // 'live' | 'curated'
   const [loading, setLoading] = useState(true);
@@ -44,6 +46,24 @@ const Leaderboard = () => {
 
   useEffect(() => {
     let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/public/datasets`);
+        const data = await res.json();
+        if (!ignore && data.success && Array.isArray(data.datasets)) {
+          setDatasetOptions(
+            data.datasets.map((d) => ({ name: d.name, label: `${d.name} (${d.task_type || "task"})` }))
+          );
+        }
+      } catch {
+        if (!ignore) setDatasetOptions([]);
+      }
+    })();
+    return () => { ignore = true; };
+  }, [API_BASE]);
+
+  useEffect(() => {
+    let ignore = false;
     const run = async () => {
       setLoading(true);
       setError("");
@@ -51,6 +71,7 @@ const Leaderboard = () => {
       try {
         const url = new URL(`${API_BASE}/public/get_leaderboard`);
         url.searchParams.set("page_size", "40");
+        if (liveDatasetFilter) url.searchParams.set("dataset", liveDatasetFilter);
         const res = await fetch(url.toString());
         const data = await res.json();
         if (!res.ok || data.success !== true) throw new Error(data.error || "Failed to load leaderboard");
@@ -67,7 +88,7 @@ const Leaderboard = () => {
     };
     run();
     return () => { ignore = true; };
-  }, [API_BASE]);
+  }, [API_BASE, liveDatasetFilter]);
 
   const loadMoreLive = async () => {
     if (!nextCursor || loadingMore) return;
@@ -76,6 +97,7 @@ const Leaderboard = () => {
     try {
       const url = new URL(`${API_BASE}/public/get_leaderboard`);
       url.searchParams.set("page_size", "40");
+      if (liveDatasetFilter) url.searchParams.set("dataset", liveDatasetFilter);
       url.searchParams.set("cursor", nextCursor);
       const res = await fetch(url.toString());
       const data = await res.json();
@@ -1104,6 +1126,26 @@ const Leaderboard = () => {
         </div>
       </header>
 
+      <div className="w-full max-w-7xl mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 px-2">
+        <label className="text-sm text-gray-400 flex flex-col sm:flex-row sm:items-center gap-2">
+          <span className="shrink-0">Live dataset</span>
+          <select
+            value={liveDatasetFilter}
+            onChange={(e) => setLiveDatasetFilter(e.target.value)}
+            className="rounded-lg bg-[#0d1421] border border-gray-700 text-white text-sm px-3 py-2 min-w-[220px]"
+          >
+            <option value="">All datasets</option>
+            {datasetOptions.map((o) => (
+              <option key={o.name} value={o.name}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="text-xs text-gray-500 sm:max-w-md">
+          Uses <code className="text-gray-400">GET /public/get_leaderboard?dataset=</code>. Resets pagination when changed.
+        </p>
+      </div>
 
       {/* ── Loading / error ── */}
       {loading && (
