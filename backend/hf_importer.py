@@ -102,12 +102,32 @@ def import_hf_dataset(
     limit: int = 100,
     task_type: Optional[str] = None,
     display_name: Optional[str] = None,
+    leaderboard_dataset_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Load a bounded HF split and convert it to this leaderboard's reference_data shape."""
     if not dataset_name:
         raise HuggingFaceImportError("dataset_name is required")
     if limit < 1 or limit > 5000:
         raise HuggingFaceImportError("limit must be between 1 and 5000")
+
+    # Personal SQuAD / GLUE SST-2 / CoNLL-2003 recipes (full ground_truth + metrics)
+    try:
+        from eval_core.hf_dataset_recipes import try_recipe_import
+        from eval_core.leaderboard_bridge import recipe_payload_to_benchmark_import
+
+        cfg = (config or "default").strip()
+        recipe = try_recipe_import(
+            dataset_name.strip(),
+            cfg,
+            split,
+            limit,
+            leaderboard_dataset_id,
+            display_name,
+        )
+        if recipe:
+            return recipe_payload_to_benchmark_import(recipe)
+    except Exception:
+        pass  # fall through to generic HF row import
 
     resolved_task_type = infer_task_type(dataset_name, task_type)
     metric = TASK_DEFAULTS.get(resolved_task_type, TASK_DEFAULTS["text_classification"])["primary_metric"]

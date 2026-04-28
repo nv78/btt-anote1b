@@ -13,23 +13,6 @@ from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 import uuid
 
-# Optional imports for evaluation
-try:
-    from nltk.translate.bleu_score import sentence_bleu
-except Exception:
-    sentence_bleu = None
-
-# Optional BERTScore
-def _optional_bertscore(predictions, references):
-    try:
-        from bert_score import BERTScorer
-        scorer = BERTScorer(model_type='bert-base-multilingual-cased')
-        P, R, F1 = scorer.score(predictions, references)
-        return float(F1.mean().item())
-    except Exception:
-        # Library not available; fall back to 0.0 rather than failing
-        return 0.0
-
 # Optional MySQL connection
 def get_db_connection():
     try:
@@ -62,7 +45,13 @@ _origins = os.getenv("ALLOWED_ORIGINS")
 if _origins:
     _origins_list = [origin.strip() for origin in _origins.split(",") if origin.strip()]
 elif _flask_env == "development":
-    _origins_list = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # Common CRA ports when 3000 is already in use (see frontend/.env.development)
+    _origins_list = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ]
 else:
     raise RuntimeError("ALLOWED_ORIGINS must be set outside development")
 CORS(app, resources={r"/*": {"origins": _origins_list}})
@@ -172,15 +161,21 @@ except Exception:
     csv_bench = None
 
 try:
-    from metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+    from metrics_info_full import METRICS_CATALOG, metrics_for_task  # type: ignore
 except Exception:
     try:
-        from backend.metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+        from backend.metrics_info_full import METRICS_CATALOG, metrics_for_task  # type: ignore
     except Exception:
-        METRICS_CATALOG = {}
+        try:
+            from metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+        except Exception:
+            try:
+                from backend.metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
+            except Exception:
+                METRICS_CATALOG = {}
 
-        def metrics_for_task(_task_type):
-            return {}
+                def metrics_for_task(_task_type):
+                    return {}
 
 
 # Root welcome endpoint for quick sanity check
@@ -207,30 +202,10 @@ def health():
     return jsonify({"ok": True, "time": utc_now().isoformat()})
 
 
-# ---------------------------
-# Leaderboard helpers
-# ---------------------------
-def _get_bleu(translations, references, weights=(0.5, 0.5, 0, 0)):
-    if not translations or not references or len(translations) != len(references):
-        return 0.0
-    if sentence_bleu is None:
-        return 0.0
-    try:
-        scores = []
-        for ref, hyp in zip(references, translations):
-            ref_tokens = ref.split()
-            hyp_tokens = hyp.split()
-            score = sentence_bleu([ref_tokens], hyp_tokens, weights=weights)
-            scores.append(score)
-        return float(sum(scores) / len(scores))
-    except Exception:
-        return 0.0
-
-
 # In-memory fallback storage when DB is not available
 _STORE = {
     "submissions": [],  # {id, benchmark_dataset_name, model_name, results, created}
-    "evaluations": [],  # {submission_id, score, metric, created}
+    "evaluations": [],  # {submission_id, score, metric, evaluation_details?, created}
     "datasets": [],  # {name, task_type, evaluation_metric, reference_data}
 }
 
@@ -370,6 +345,8 @@ def get_leaderboard():
                     "score": float(row['score']),
                     "submitted_by": row.get("submitted_by"),
                     "metadata": details.get("metadata") if isinstance(details, dict) else None,
+                    "detailed_scores": details.get("detailed_scores") if isinstance(details, dict) else None,
+                    "primary_metric": details.get("metric") if isinstance(details, dict) else None,
                     "submitted_at": row['submitted_at'].isoformat() if row.get('submitted_at') else None,
                 })
             return jsonify({
@@ -402,15 +379,24 @@ def get_leaderboard():
     mem = mem_all[offset:offset + page_size]
     leaderboard = []
     for i, (ev, sub) in enumerate(mem, start=offset):
+        ev_details = ev.get("evaluation_details") or {}
+        if not isinstance(ev_details, dict):
+            ev_details = {}
+        ds_meta = next(
+            (d for d in _STORE["datasets"] if d.get("name") == sub["benchmark_dataset_name"]),
+            None,
+        )
         leaderboard.append({
             "rank": i + 1,
             "model_name": sub["model_name"],
             "dataset_name": sub["benchmark_dataset_name"],
-            "task_type": "translation",
+            "task_type": (ds_meta or {}).get("task_type") or "translation",
             "evaluation_metric": ev["metric"],
             "score": ev["score"],
             "submitted_by": sub.get("submitted_by"),
-            "metadata": sub.get("metadata"),
+            "metadata": ev_details.get("metadata") if ev_details else sub.get("metadata"),
+            "detailed_scores": ev_details.get("detailed_scores"),
+            "primary_metric": ev_details.get("metric"),
             "submitted_at": sub["created"].isoformat(),
         })
     return jsonify({
@@ -512,106 +498,44 @@ def submit_model():
                     reference_answers = [all_ans[i] for i in sentence_ids if 0 <= i < len(all_ans)]
                     if len(reference_answers) != len(sentence_ids):
                         reference_answers = None
+                if isinstance(rd.get('ground_truth'), list) and sentence_ids:
+                    gtlist = rd['ground_truth']
+                    try:
+                        if all(0 <= int(i) < len(gtlist) for i in sentence_ids):
+                            rows = [gtlist[int(i)] for i in sentence_ids]
+                            _tt = (task_type or '').lower()
+                            if not reference_labels and _tt == 'text_classification':
+                                reference_labels = [r.get('answer') for r in rows]
+                            if not reference_entities and _tt in ('ner', 'named_entity_recognition'):
+                                reference_entities = [r.get('answer') for r in rows]
+                            if not reference_answers and _tt in (
+                                'chatbot', 'prompting', 'qa', 'document_qa', 'line_qa',
+                            ):
+                                reference_answers = [r.get('answer') for r in rows]
+                            if not reference_sentences and _tt in ('translation', ''):
+                                reference_sentences = [r.get('answer') for r in rows]
+                    except Exception:
+                        pass
         except Exception:
             pass
 
-    # Helpers for classification
-    def _accuracy(y_true, y_pred):
-        if not y_true or len(y_true) != len(y_pred):
-            return 0.0
-        correct = sum(1 for a, b in zip(y_true, y_pred) if str(a).strip() == str(b).strip())
-        return float(correct) / float(len(y_true)) if y_true else 0.0
-
-    def _f1_macro(y_true, y_pred):
-        # Simple macro-F1 without external deps
-        from collections import Counter
-        labels = set(map(str, y_true)) | set(map(str, y_pred))
-        tp = Counter()
-        fp = Counter()
-        fn = Counter()
-        for t, p in zip(map(str, y_true), map(str, y_pred)):
-            if t == p:
-                tp[t] += 1
-            else:
-                fp[p] += 1
-                fn[t] += 1
-        f1s = []
-        for c in labels:
-            precision = tp[c] / (tp[c] + fp[c]) if (tp[c] + fp[c]) > 0 else 0.0
-            recall = tp[c] / (tp[c] + fn[c]) if (tp[c] + fn[c]) > 0 else 0.0
-            f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-            f1s.append(f1)
-        return float(sum(f1s) / len(f1s)) if f1s else 0.0
-
-    # Helpers for NER (simple entity-string macro-F1)
-    def _f1_entities(ref_lists, pred_lists):
-        # Each element is a list of strings. Compute micro or macro? We'll do macro over examples.
-        if not ref_lists or not pred_lists or len(ref_lists) != len(pred_lists):
-            return 0.0
-        f1s = []
-        for refs, preds in zip(ref_lists, pred_lists):
-            rs = set(str(r).strip() for r in (refs or []) if str(r).strip())
-            ps = set(str(p).strip() for p in (preds or []) if str(p).strip())
-            tp = len(rs & ps)
-            precision = tp / len(ps) if ps else 0.0
-            recall = tp / len(rs) if rs else 0.0
-            f1 = (2*precision*recall)/(precision+recall) if (precision+recall)>0 else 0.0
-            f1s.append(f1)
-        return float(sum(f1s)/len(f1s)) if f1s else 0.0
-
-    # Helpers for QA (exact/token F1)
-    def _normalize(s: str):
-        import re
-        return re.sub(r"\s+", " ", str(s).strip().lower())
-
-    def _f1_tokens(a, b):
-        at = _normalize(a).split()
-        bt = _normalize(b).split()
-        common = set(at) & set(bt)
-        if not at and not bt:
-            return 1.0
-        if not common:
-            return 0.0
-        prec = len(common) / len(bt) if bt else 0.0
-        rec = len(common) / len(at) if at else 0.0
-        return (2*prec*rec)/(prec+rec) if (prec+rec)>0 else 0.0
-
-    # Evaluate based on task
     try:
-        tt = (task_type or '').lower()
-        if tt == 'text_classification':
-            if not reference_labels:
-                return jsonify({"success": False, "error": "Dataset does not have reference labels"}), 400
-            metric = (metric or 'accuracy').lower()
-            if metric == 'f1':
-                score = _f1_macro(reference_labels, model_results)
-            else:
-                score = _accuracy(reference_labels, model_results)
-        elif tt == 'ner':
-            if not reference_entities:
-                return jsonify({"success": False, "error": "Dataset does not have reference entities"}), 400
-            # Parse predicted entities by splitting on ';'
-            pred_lists = []
-            for out in model_results:
-                parts = [p.strip() for p in str(out).split(';') if p and str(p).strip()]
-                pred_lists.append(parts)
-            score = _f1_entities(reference_entities, pred_lists)
-        elif tt in ('chatbot', 'prompting', 'qa', 'document_qa', 'line_qa'):
-            if not reference_answers:
-                return jsonify({"success": False, "error": "Dataset does not have reference answers"}), 400
-            metric = (metric or 'exact').lower()
-            vals = []
-            for ref, pred in zip(reference_answers, model_results):
-                ref_s = ref if isinstance(ref, str) else (ref[0] if isinstance(ref, (list, tuple)) and ref else '')
-                if metric == 'f1':
-                    vals.append(_f1_tokens(ref_s, pred))
-                else:
-                    vals.append(1.0 if _normalize(ref_s) == _normalize(pred) else 0.0)
-            score = float(sum(vals)/len(vals)) if vals else 0.0
-        else:
-            # translation default path
+        try:
+            from eval_core.leaderboard_bridge import (  # type: ignore
+                normalize_eval_metric,
+                normalize_task_type,
+                run_personal_eval,
+            )
+        except ImportError:
+            from backend.eval_core.leaderboard_bridge import (  # type: ignore
+                normalize_eval_metric,
+                normalize_task_type,
+                run_personal_eval,
+            )
+
+        task_norm = normalize_task_type(task_type)
+        if task_norm == 'translation':
             if reference_sentences is None:
-                # Choose references. For FLORES Spanish, use our local pool subset by ids.
                 if benchmark_dataset_name.startswith('flores_spanish_translation'):
                     references_pool = _SPANISH_REFERENCES
                     for sid in sentence_ids:
@@ -625,14 +549,27 @@ def submit_model():
                     reference_sentences = [
                         _SPANISH_REFERENCES[i % len(_SPANISH_REFERENCES)] for i in sentence_ids
                     ]
-            metric = (metric or ('bertscore' if benchmark_dataset_name.endswith('_bertscore') else 'bleu')).lower()
-            if metric == 'bleu':
-                score = _get_bleu(model_results, reference_sentences)
-            else:
-                score = _optional_bertscore(model_results, reference_sentences)
+            if metric is None:
+                metric = 'bertscore' if benchmark_dataset_name.endswith('_bertscore') else 'bleu'
+
+        score, detailed_scores = run_personal_eval(
+            task_type,
+            metric,
+            sentence_ids,
+            reference_labels,
+            reference_entities,
+            reference_answers,
+            reference_sentences,
+            model_results,
+        )
+        metric = normalize_eval_metric(metric, task_norm)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         print(f"Evaluation failed: {e}")
         return jsonify({"success": False, "error": "Evaluation failed"}), 500
+
+    eval_details = {"metric": metric, "metadata": metadata, "detailed_scores": detailed_scores}
 
     # Try to persist in DB; otherwise store in memory
     conn, cursor = get_db_connection()
@@ -664,7 +601,7 @@ def submit_model():
             cursor.execute(
                 "INSERT INTO evaluation_results (model_submission_id, score, evaluation_details) "
                 "VALUES (%s, %s, %s)",
-                (submission_id, float(score), json.dumps({"metric": metric, "metadata": metadata}))
+                (submission_id, float(score), json.dumps(eval_details))
             )
             conn.commit()
         except Exception as e:
@@ -695,6 +632,7 @@ def submit_model():
             "submission_id": submission_id,
             "score": float(score),
             "metric": metric,
+            "evaluation_details": eval_details,
             "created": utc_now(),
         })
 
@@ -702,7 +640,12 @@ def submit_model():
         "model_submitted",
         extra={"dataset": benchmark_dataset_name, "model": model_name, "score": float(score)},
     )
-    return jsonify({"success": True, "score": float(score)})
+    return jsonify({
+        "success": True,
+        "score": float(score),
+        "metric": metric,
+        "detailed_scores": detailed_scores,
+    })
 
 
 # ---------------------------
@@ -1005,6 +948,7 @@ def import_hf_dataset_public():
             limit=int(data.get("limit", 100)),
             task_type=data.get("task_type"),
             display_name=data.get("display_name"),
+            leaderboard_dataset_id=data.get("leaderboard_dataset_id") or data.get("dataset_id"),
         )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
@@ -1082,6 +1026,7 @@ def ingest_dataset():
         "task_type": data.get("task_type"),
         "display_name": data.get("display_name"),
         "preview_only": data.get("preview_only", False),
+        "leaderboard_dataset_id": data.get("leaderboard_dataset_id") or data.get("dataset_id"),
     }
     with app.test_request_context(
         "/public/import_hf_dataset",

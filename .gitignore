@@ -4,3 +4,9 @@ __pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+
+# Local Python / secrets
+.venv/
+venv/
+.env
+.env.local

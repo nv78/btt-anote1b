@@ -5,7 +5,11 @@ requests>=2.31
 nltk>=3.8
 flasgger>=0.9.7
 pytest>=7.0
-# Optional deps (not required for demo):
+numpy>=1.26.0
+scipy>=1.13.0
+scikit-learn>=1.4.0
+datasets>=2.19.0
+# Optional (translation BERTScore, LLM/HF runners):
 # bert-score>=0.3
 # mysql-connector-python>=8.0
 # openai>=1.40.0

@@ -225,9 +225,10 @@ Run the backend on port 5001 and seed example data, then start the frontend.
 - This seeds two demo submissions to the `flores_spanish_translation` dataset.
 
 3) Frontend
-- In `frontend/`: `npm install`
-- Ensure the frontend points to the backend (default works):
-  - `REACT_APP_API_BASE=http://localhost:5001 npm start`
+- In `frontend/`: `npm install` (uses `frontend/.npmrc` so peer conflicts resolve on modern npm)
+- Dev server defaults: **`frontend/.env.development`** sets `PORT=3001` (avoids clashing with another app on 3000) and `REACT_APP_API_BASE` to match your Flask port (e.g. `5005`). Edit that file if your API port differs.
+- Start: `npm start` (or override in one shot: `PORT=3001 REACT_APP_API_BASE=http://127.0.0.1:5005 npm start`)
+- The Flask app allows CORS from `localhost` / `127.0.0.1` on ports **3000** and **3001** in development. **Restart the backend** after pulling changes so CORS picks up port 3001. For a custom port, set `ALLOWED_ORIGINS` (comma-separated) when starting Flask.
 - Open the Evaluations page to see demo scores populate.
 
 Docker option:
