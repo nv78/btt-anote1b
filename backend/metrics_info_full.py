@@ -346,6 +346,75 @@ METRICS_CATALOG = {
             "0.0-0.4 or 2.0+": "Poor - Severely wrong length",
         },
     },
+    "rouge_1": {
+        "name": "ROUGE-1",
+        "formula": "Overlap of unigrams between prediction and reference / union size",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Recall-oriented unigram overlap; standard for summarization and open QA overlap.",
+        "example": "Shared content words increase ROUGE-1 even when word order differs.",
+        "when_to_use": "Summarization, headline generation, long-form QA overlap",
+        "limitations": "Surface overlap only; synonyms score zero.",
+        "interpretation": {
+            "0.5-1.0": "Strong overlap",
+            "0.35-0.5": "Moderate",
+            "0.0-0.35": "Weak",
+        },
+    },
+    "rouge_l": {
+        "name": "ROUGE-L",
+        "formula": "Longest common subsequence F-score between prediction and reference",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Captures longest contiguous / sequential overlap; popular for summarization alongside ROUGE-1/2.",
+        "example": "Better than ROUGE-1 when correct phrases appear in order.",
+        "when_to_use": "Summarization benchmarks (e.g. CNN/DM style)",
+        "limitations": "Still lexical; no semantics.",
+        "interpretation": {
+            "0.45-1.0": "Strong sequential overlap",
+            "0.25-0.45": "Moderate",
+            "0.0-0.25": "Weak",
+        },
+    },
+    "meteor": {
+        "name": "METEOR",
+        "formula": "Harmonic mean of precision/recall with synonym/stem alignment penalty",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Aligns hypotheses to references with synonyms and stemming; more semantic than BLEU/ROUGE alone.",
+        "example": "‘car’ vs ‘automobile’ can match unlike BLEU.",
+        "when_to_use": "MT and generation where paraphrase matters",
+        "limitations": "Heavier to compute than n-gram overlap.",
+        "interpretation": {
+            "0.35-1.0": "Strong alignment",
+            "0.2-0.35": "Moderate",
+            "0.0-0.2": "Weak",
+        },
+    },
+    "squad_f1": {
+        "name": "SQuAD-style token F1",
+        "formula": "Token-level precision/recall F1 after normalization",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Standard span QA overlap metric; complements exact match.",
+        "example": "Partial spans receive partial credit vs EM.",
+        "when_to_use": "Reading comprehension / extractive QA",
+        "limitations": "Needs comparable tokenization.",
+        "interpretation": {
+            "0.85-1.0": "Excellent",
+            "0.65-0.85": "Good",
+            "0.0-0.65": "Weak",
+        },
+    },
+    "squad_em": {
+        "name": "SQuAD Exact Match",
+        "formula": "1 if normalized prediction equals normalized gold span else 0",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Strict match after normalization—stricter than token F1.",
+        "when_to_use": "QA leaderboards alongside squad_f1",
+        "limitations": "No partial credit.",
+        "interpretation": {
+            "0.75-1.0": "Excellent",
+            "0.5-0.75": "Good",
+            "0.0-0.5": "Poor",
+        },
+    },
     # Retrieval Metrics
     "retrieval_accuracy": {
         "name": "Retrieval Accuracy",
@@ -482,6 +551,62 @@ METRICS_CATALOG = {
             "0.0-0.5": "Poor - Many relevant docs not in top 5",
         },
     },
+    "map": {
+        "name": "Mean Average Precision (MAP)",
+        "formula": "Mean over queries of Average Precision (area under precision-recall curve)",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Summarizes ranking quality across all ranks; standard for ad-hoc retrieval evaluation.",
+        "example": "Higher MAP means relevant documents rank higher on average.",
+        "when_to_use": "Information retrieval leaderboards",
+        "limitations": "Needs graded or binary relevance per ranked position.",
+        "interpretation": {
+            "0.6-1.0": "Excellent retrieval ranking",
+            "0.4-0.6": "Moderate",
+            "0.0-0.4": "Poor",
+        },
+    },
+    "hits_at_10": {
+        "name": "Hits@10",
+        "formula": "Fraction of queries with ≥1 relevant doc in top 10",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Lenient retrieval success—‘did anything good appear in first page?’",
+        "when_to_use": "High-recall retrieval diagnostics",
+        "limitations": "Ignores rank within top 10.",
+        "interpretation": {
+            "0.9-1.0": "Excellent",
+            "0.7-0.9": "Good",
+            "0.0-0.7": "Needs work",
+        },
+    },
+    # Machine translation / generation (surface metrics)
+    "chrf": {
+        "name": "chrF / chrF++",
+        "formula": "Character n-gram F-score between hypothesis and reference",
+        "range": "0.0 - 100.0 or 0.0 - 1.0 depending on implementation (higher is better)",
+        "description": "Character-level overlap; robust to morphology and spacing differences vs pure BLEU.",
+        "example": "Often reported as chrF++ in WMT.",
+        "when_to_use": "Machine translation when BLEU is misleading",
+        "limitations": "Still lexical; normalize scale when comparing runs.",
+        "interpretation": {
+            "0.5-1.0": "Strong (if normalized)",
+            "0.35-0.5": "Moderate",
+            "0.0-0.35": "Weak",
+        },
+    },
+    "ter": {
+        "name": "Translation Edit Rate (TER)",
+        "formula": "Minimum edits to transform hypothesis into reference / reference length",
+        "range": "0.0+ (lower is better)",
+        "description": "Edit-distance based; standard in MT evaluation alongside BLEU/chrF.",
+        "example": "TER of 0.25 means ~25% edits relative to reference length.",
+        "when_to_use": "MT quality when ordering by ease of post-editing",
+        "limitations": "Lower is better—invert when mixing with ‘higher is better’ metrics.",
+        "interpretation": {
+            "0.0-0.2": "Excellent",
+            "0.2-0.4": "Good",
+            "0.4+": "Poor",
+        },
+    },
     # Multilingual / per-language metrics (for advanced breakdowns)
     "per_language_accuracy": {
         "name": "Per-Language Accuracy",
@@ -558,6 +683,32 @@ METRICS_CATALOG = {
             "1000+": "Poor",
         },
     },
+    "mean_distance_error": {
+        "name": "Mean distance error",
+        "formula": "Mean great-circle distance between predicted and true coordinates (km)",
+        "range": "0 km+ (lower is better)",
+        "description": "Average localization error; sensitive to outliers unlike median.",
+        "when_to_use": "When penalizing rare large misses matters",
+        "limitations": "Single bad prediction can dominate.",
+        "interpretation": {
+            "0-80": "Strong",
+            "80-300": "Moderate",
+            "300+": "Weak",
+        },
+    },
+    "macro_f1": {
+        "name": "Macro F1",
+        "formula": "Unweighted mean of per-class F1 scores",
+        "range": "0.0 - 1.0 (higher is better)",
+        "description": "Treats all classes equally—preferred when reporting multi-class imbalance alongside micro metrics.",
+        "when_to_use": "Multi-class classification benchmarks",
+        "limitations": "Rare classes influence equally with frequent ones.",
+        "interpretation": {
+            "0.85-1.0": "Excellent",
+            "0.65-0.85": "Good",
+            "0.0-0.65": "Fair/Poor",
+        },
+    },
 }
 
 
@@ -575,6 +726,19 @@ def normalize_task_type_for_metrics(task_type: Optional[str]) -> str:
         "classification": "text_classification",
         "geolocation_inference": "geolocation",
         "geo": "geolocation",
+        "summerization": "summarization",
+        "sum": "summarization",
+        "mt": "translation",
+        "machine_translation": "translation",
+        "reading_comprehension": "document_qa",
+        "extractive_qa": "document_qa",
+        "span_qa": "document_qa",
+        "information_retrieval": "retrieval",
+        "rag": "retrieval",
+        "multi_label": "text_classification",
+        "reasoning": "text_classification",
+        "multiple_choice": "text_classification",
+        "multilingual_eval": "multilingual",
     }
     return aliases.get(t, t)
 
@@ -601,33 +765,93 @@ def get_metric_info(metric_name: str) -> dict:
 
 
 def get_metrics_for_task(task_type: str) -> list:
-    """Get all relevant metrics for a task type."""
+    """Ordered list of advanced metric keys commonly reported for each leaderboard task type."""
     task_metrics = {
         "text_classification": [
             "accuracy",
+            "balanced_accuracy",
+            "macro_f1",
             "precision",
             "recall",
             "f1",
-            "balanced_accuracy",
-            "cohens_kappa",
-            "matthews_corr",
-            "micro_f1",
             "micro_precision",
             "micro_recall",
+            "micro_f1",
+            "cohens_kappa",
+            "matthews_corr",
         ],
         "named_entity_recognition": [
-            "f1",
+            "ner_precision",
+            "ner_recall",
+            "ner_f1",
             "precision",
             "recall",
+            "f1",
+            "partial_precision",
+            "partial_recall",
             "partial_f1",
         ],
-        "document_qa": ["exact_match", "token_f1", "bleu"],
-        "line_qa": ["exact_match", "token_f1"],
-        "retrieval": ["retrieval_accuracy", "mrr", "precision_at_3", "recall_at_3"],
-        "translation": ["bleu", "bertscore", "bertscore_unavailable"],
-        "geolocation": ["median_distance_error", "accuracy"],
+        "document_qa": [
+            "exact_match",
+            "squad_em",
+            "squad_f1",
+            "token_f1",
+            "bleu",
+            "rouge_1",
+            "rouge_l",
+            "meteor",
+            "answer_length_ratio",
+        ],
+        "line_qa": [
+            "exact_match",
+            "token_f1",
+            "bleu",
+            "rouge_1",
+            "meteor",
+        ],
+        "retrieval": [
+            "retrieval_accuracy",
+            "mrr",
+            "map",
+            "ndcg",
+            "precision_at_1",
+            "precision_at_3",
+            "precision_at_5",
+            "recall_at_1",
+            "recall_at_3",
+            "recall_at_5",
+            "hits_at_10",
+        ],
+        "translation": [
+            "bleu",
+            "chrf",
+            "ter",
+            "bertscore",
+            "bertscore_unavailable",
+        ],
+        "summarization": [
+            "rouge_1",
+            "rouge_l",
+            "bleu",
+            "meteor",
+            "bertscore",
+        ],
+        "geolocation": [
+            "median_distance_error",
+            "mean_distance_error",
+            "accuracy",
+        ],
+        "multilingual": [
+            "accuracy",
+            "macro_f1",
+            "f1",
+            "per_language_accuracy",
+            "per_language_f1",
+            "cross_lingual_transfer",
+            "language_variance",
+        ],
     }
-    return task_metrics.get(task_type, ["accuracy"])
+    return task_metrics.get(task_type, ["accuracy", "f1", "precision", "recall"])
 
 
 def metrics_for_task(task_type: str) -> dict:

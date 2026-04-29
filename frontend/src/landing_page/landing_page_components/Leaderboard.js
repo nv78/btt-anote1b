@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 import { useNavigate } from "react-router-dom";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
+import TaskAdvancedMetricsPanel from "./TaskAdvancedMetricsPanel";
 
 function humanizeMetricKey(metric) {
   if (!metric || String(metric).trim() === "") return "";
@@ -1275,7 +1276,7 @@ const Leaderboard = () => {
           const dkey = dataset.name || `idx-${index}`;
           const showAdv = !!advancedMetrics[dkey];
           const showAllRanks = !!expandedRankDepth[dkey];
-          const extras = showAdv ? extraMetricKeys(dataset.models, dataset.evaluation_metric) : [];
+          const extras = showAdv ? [] : extraMetricKeys(dataset.models, dataset.evaluation_metric);
           const gridTemplateColumns = [
             "3rem",
             "minmax(0,1fr)",
@@ -1430,6 +1431,14 @@ const Leaderboard = () => {
                 })}
               </div>
             </div>
+
+            {showAdv && (
+              <TaskAdvancedMetricsPanel
+                apiBase={API_BASE}
+                taskType={dataset.task_type || "text_classification"}
+                models={visibleModels}
+              />
+            )}
           </div>
           );
         })}

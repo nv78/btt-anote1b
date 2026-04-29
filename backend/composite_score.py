@@ -20,6 +20,7 @@ _LOWER_IS_BETTER = frozenset(
         "rmse",
         "mae",
         "perplexity",
+        "ter",
     }
 )
 

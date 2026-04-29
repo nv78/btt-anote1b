@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import TaskAdvancedMetricsPanel from './TaskAdvancedMetricsPanel';
 
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || 'http://localhost:5001';
 
@@ -122,6 +123,19 @@ const DatasetDetails = () => {
                     <MetricCard key={key} metricKey={key} metric={metric} />
                   ))}
                 </div>
+              </div>
+            )}
+
+            {ds.task_type && (
+              <div className="mt-8 border border-gray-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 bg-gray-950/80 border-b border-gray-800">
+                  <div className="text-white font-semibold text-sm">Full metric glossary (this task)</div>
+                  <p className="text-gray-500 text-xs mt-1">
+                    Every advanced metric we surface for <span className="text-gray-300">{ds.task_type}</span>, with how it is computed.
+                    Per-model cells appear when evaluation returns those keys in <code className="text-gray-400">detailed_scores</code>.
+                  </p>
+                </div>
+                <TaskAdvancedMetricsPanel apiBase={API_BASE} taskType={ds.task_type} models={[]} className="border-t-0 bg-transparent px-2 pb-4" />
               </div>
             )}
 
