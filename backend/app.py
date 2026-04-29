@@ -6,7 +6,12 @@ try:
 
     from dotenv import load_dotenv
 
-    load_dotenv(Path(__file__).resolve().parent / ".env")
+    _bd = Path(__file__).resolve().parent
+    load_dotenv(_bd / ".env")
+    # Monorepo root .env (e.g. Anote/.env when path is …/Anote/Leaderboard/backend/app.py)
+    _root = _bd.parent.parent
+    if (_root / ".env").is_file() and (_root / "Leaderboard" / "backend" / "app.py").is_file():
+        load_dotenv(_root / ".env", override=True)
 except ImportError:
     pass
 
