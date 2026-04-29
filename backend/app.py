@@ -1821,9 +1821,14 @@ def google_oauth_start():
     """Begin Google OAuth (requires ``GOOGLE_CLIENT_ID`` and Authlib)."""
     if _OAUTH is None:
         return jsonify({"success": False, "error": "OAuth not configured"}), 501
-    redirect_uri = os.getenv("LEADERBOARD_OAUTH_REDIRECT_URI", "").strip()
-    if not redirect_uri:
+    # Prefer deriving redirect_uri from this request so localhost vs 127.0.0.1 matches Google Console.
+    # Optional LEADERBOARD_OAUTH_PUBLIC_BASE_URL=https://api.example.com when TLS terminates at proxy (wrong Host in Flask).
+    public_base = os.getenv("LEADERBOARD_OAUTH_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if public_base:
+        redirect_uri = public_base + "/public/auth/google/callback"
+    else:
         redirect_uri = request.url_root.rstrip("/") + "/public/auth/google/callback"
+    logger.info("google_oauth_start", extra={"redirect_uri": redirect_uri})
     return _OAUTH.google.authorize_redirect(redirect_uri)
 
 
