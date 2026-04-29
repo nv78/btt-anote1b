@@ -1,4 +1,15 @@
 import os
+
+# Local dev: load Leaderboard/backend/.env when python-dotenv is installed.
+try:
+    from pathlib import Path
+
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
+
 import json
 import csv
 import logging
