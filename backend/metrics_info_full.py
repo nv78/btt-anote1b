@@ -543,6 +543,21 @@ METRICS_CATALOG = {
             "0.20+": "Poor - Highly inconsistent performance",
         },
     },
+    "median_distance_error": {
+        "name": "Median distance error",
+        "formula": "Median great-circle distance between predicted (lat, lon) and ground truth, in kilometers",
+        "range": "0 km+ (lower is better)",
+        "description": "Summarizes geolocation accuracy: half of predictions fall within this distance of the true point.",
+        "example": "If median error is 120 km, typical predictions are within ~120 km of the correct location.",
+        "when_to_use": "Standard summary for image/text geolocation benchmarks where exact coordinates are scored.",
+        "limitations": "Insensitive to occasional huge outliers compared to mean error.",
+        "interpretation": {
+            "0-50": "Excellent localization",
+            "50-200": "Good regional accuracy",
+            "200-1000": "Coarse location only",
+            "1000+": "Poor",
+        },
+    },
 }
 
 
@@ -558,6 +573,8 @@ def normalize_task_type_for_metrics(task_type: Optional[str]) -> str:
         "prompting": "line_qa",
         "multiclass": "text_classification",
         "classification": "text_classification",
+        "geolocation_inference": "geolocation",
+        "geo": "geolocation",
     }
     return aliases.get(t, t)
 
@@ -608,6 +625,7 @@ def get_metrics_for_task(task_type: str) -> list:
         "line_qa": ["exact_match", "token_f1"],
         "retrieval": ["retrieval_accuracy", "mrr", "precision_at_3", "recall_at_3"],
         "translation": ["bleu", "bertscore", "bertscore_unavailable"],
+        "geolocation": ["median_distance_error", "accuracy"],
     }
     return task_metrics.get(task_type, ["accuracy"])
 

@@ -3,18 +3,77 @@ import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboard
 import { useNavigate } from "react-router-dom";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 
+function humanizeMetricKey(metric) {
+  if (!metric || String(metric).trim() === "") return "";
+  return String(metric)
+    .trim()
+    .replace(/_/g, " ")
+    .replace(/\b([a-z])/g, (c) => c.toUpperCase());
+}
+
+/** Extra numeric detailed_scores keys for leaderboard grid (excluding primary metric alias). */
+function extraMetricKeys(models, evaluationMetric) {
+  const pm = (evaluationMetric || "").toLowerCase().trim().replace(/\s+/g, "_");
+  const seen = new Set();
+  const ordered = [];
+  for (const m of models || []) {
+    const ds = m?.detailed_scores;
+    if (!ds || typeof ds !== "object") continue;
+    for (const [k, v] of Object.entries(ds)) {
+      if (k === "bertscore_unavailable" || v == null || typeof v !== "number") continue;
+      if (k.toLowerCase() === pm) continue;
+      if (!seen.has(k)) {
+        seen.add(k);
+        ordered.push(k);
+      }
+    }
+  }
+  return ordered.slice(0, 3);
+}
+
+function formatMetricCell(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  const dec = Math.abs(value) < 1 ? 3 : 2;
+  return value.toFixed(dec);
+}
+
+/** Display aggregate (0–100) from API composite_score, or scale legacy 0–1 primary scores for consistency. */
+function formatAggregateScore(model) {
+  if (typeof model.composite_score === "number" && !Number.isNaN(model.composite_score)) {
+    return model.composite_score.toFixed(1);
+  }
+  const s = model.score;
+  if (typeof s !== "number" || Number.isNaN(s)) return String(s ?? "—");
+  if (s >= 0 && s <= 1) return (s * 100).toFixed(1);
+  return s.toFixed(Math.abs(s) < 1 ? 3 : 2);
+}
+
+function compositeTooltip(model) {
+  const br = model.composite_breakdown;
+  if (!Array.isArray(br) || br.length === 0) return undefined;
+  return br.map((x) => `${x.metric}: raw ${x.raw} (weight ${x.weight})`).join("\n");
+}
+
 function groupLeaderboardEntries(entries) {
   if (!Array.isArray(entries) || !entries.length) return [];
   const grouped = entries.reduce((acc, e) => {
     const key = e.dataset_name || "Unknown Dataset";
     if (!acc[key]) {
-      acc[key] = { name: key, evaluation_metric: e.evaluation_metric, task_type: e.task_type, models: [] };
-    } else if (e.task_type && !acc[key].task_type) {
-      acc[key].task_type = e.task_type;
+      acc[key] = {
+        name: key,
+        evaluation_metric: e.evaluation_metric,
+        task_type: e.task_type,
+        models: [],
+      };
+    } else {
+      if (e.task_type && !acc[key].task_type) acc[key].task_type = e.task_type;
+      if (e.evaluation_metric && !acc[key].evaluation_metric) acc[key].evaluation_metric = e.evaluation_metric;
     }
     acc[key].models.push({
       model: e.model_name,
       score: typeof e.score === "number" ? e.score : Number(e.score) || 0,
+      composite_score: typeof e.composite_score === "number" ? e.composite_score : undefined,
+      composite_breakdown: Array.isArray(e.composite_breakdown) ? e.composite_breakdown : undefined,
       updated: e.submitted_at ? new Date(e.submitted_at).toLocaleDateString() : "",
       primary_metric: e.primary_metric,
       detailed_scores: e.detailed_scores,
@@ -23,7 +82,21 @@ function groupLeaderboardEntries(entries) {
   }, {});
   return Object.values(grouped).map((d) => {
     const next = { ...d, models: [...d.models] };
-    next.models.sort((a, b) => b.score - a.score);
+    next.models.sort((a, b) => {
+      const ca =
+        typeof a.composite_score === "number"
+          ? a.composite_score
+          : typeof a.score === "number" && a.score >= 0 && a.score <= 1
+            ? a.score * 100
+            : a.score;
+      const cb =
+        typeof b.composite_score === "number"
+          ? b.composite_score
+          : typeof b.score === "number" && b.score >= 0 && b.score <= 1
+            ? b.score * 100
+            : b.score;
+      return Number(cb) - Number(ca);
+    });
     next.models = next.models.map((m, i) => ({ rank: i + 1, ...m }));
     return next;
   });
@@ -31,6 +104,8 @@ function groupLeaderboardEntries(entries) {
 
 const Leaderboard = () => {
   const [openIndex, setOpenIndex] = useState(null);
+  const [expandedRankDepth, setExpandedRankDepth] = useState({});
+  const [advancedMetrics, setAdvancedMetrics] = useState({});
   const [liveEntries, setLiveEntries] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -119,7 +194,18 @@ const Leaderboard = () => {
         const res = await fetch(`${API_BASE}/api/leaderboard/list`);
         const data = await res.json();
         if (!res.ok || data.status !== 'success') return;
-        const groups = (data.datasets || []).map(d => ({ name: d.name, url: d.url, evaluation_metric: '', models: (d.models||[]).map(m => ({ rank: m.rank, model: m.model, score: m.score, updated: m.updated })) }));
+        const groups = (data.datasets || []).map((d) => ({
+          name: d.name,
+          url: d.url,
+          task_type: d.task_type,
+          evaluation_metric: d.evaluation_metric || "",
+          models: (d.models || []).map((m) => ({
+            rank: m.rank,
+            model: m.model,
+            score: m.score,
+            updated: m.updated,
+          })),
+        }));
         if (!ignore) setCuratedDatasets(groups);
       } catch {}
     };
@@ -163,6 +249,8 @@ const Leaderboard = () => {
   const datasets = [
     {
       name: "FinanceBench - Retrieval Accuracy",
+      task_type: "retrieval",
+      evaluation_metric: "retrieval_accuracy",
       url: "https://github.com/patronus-ai/financebench",
       models: [
         {
@@ -211,6 +299,8 @@ const Leaderboard = () => {
     },
     {
       name: "Amazon Reviews - Classification Accuracy",
+      task_type: "text_classification",
+      evaluation_metric: "accuracy",
       url: "https://huggingface.co/datasets/m-ric/amazon_product_reviews_datafiniti",
       models: [
         {
@@ -259,6 +349,8 @@ const Leaderboard = () => {
     },
     {
       name: "RAG Instruct - Answer Accuracy",
+      task_type: "document_qa",
+      evaluation_metric: "exact_match",
       url: "https://huggingface.co/datasets/llmware/rag_instruct_benchmark_tester",
       models: [
         {
@@ -307,6 +399,8 @@ const Leaderboard = () => {
     },
     {
       name: "Financial Phrasebank - Classify Accuracy",
+      task_type: "text_classification",
+      evaluation_metric: "f1",
       url: "https://huggingface.co/datasets/takala/financial_phrasebank",
       models: [
         {
@@ -355,6 +449,8 @@ const Leaderboard = () => {
     },
     {
       name: "TREC - Hierarchical Classification Accuracy",
+      task_type: "text_classification",
+      evaluation_metric: "accuracy",
       url: "https://huggingface.co/datasets/CogComp/trec",
       models: [
         {
@@ -396,6 +492,8 @@ const Leaderboard = () => {
     },
     {
       name: "Banking Dataset - Classification Accuracy",
+      task_type: "text_classification",
+      evaluation_metric: "accuracy",
       url: "https://huggingface.co/datasets/takala/financial_phrasebank",
       models: [
         {
@@ -437,6 +535,8 @@ const Leaderboard = () => {
     },
     {
       "name": "ARC-SMART",
+      "task_type": "text_classification",
+      "evaluation_metric": "accuracy",
       "url": "https://huggingface.co/datasets/vipulgupta/arc-smart",
       "models": [
         {
@@ -617,6 +717,8 @@ const Leaderboard = () => {
     },
     {
       "name": "MMLU-SMART",
+      "task_type": "text_classification",
+      "evaluation_metric": "accuracy",
       "url": "https://huggingface.co/datasets/vipulgupta/mmlu-smart",
       "models": [
         {
@@ -803,6 +905,8 @@ const Leaderboard = () => {
     },
     {
       "name": "CommonsenseQA-SMART",
+      "task_type": "text_classification",
+      "evaluation_metric": "accuracy",
       "url": "https://huggingface.co/datasets/vipulgupta/commonsense_qa_smart",
       "models": [
         {
@@ -989,6 +1093,8 @@ const Leaderboard = () => {
     },
     {
       "name": "Geolocation Inference - Median Distance Error",
+      "task_type": "geolocation",
+      "evaluation_metric": "median_distance_error",
       "url": "https://github.com/njspyx/location-inference",
       "models": [
           {
@@ -1165,7 +1271,20 @@ const Leaderboard = () => {
 
       {/* ── Dataset cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6 mt-10 w-full max-w-7xl">
-        {displayDatasets.map((dataset, index) => (
+        {displayDatasets.map((dataset, index) => {
+          const dkey = dataset.name || `idx-${index}`;
+          const showAdv = !!advancedMetrics[dkey];
+          const showAllRanks = !!expandedRankDepth[dkey];
+          const extras = showAdv ? extraMetricKeys(dataset.models, dataset.evaluation_metric) : [];
+          const gridTemplateColumns = [
+            "3rem",
+            "minmax(0,1fr)",
+            `minmax(4.25rem, ${extras.length ? "6.5rem" : "7rem"})`,
+            ...extras.map(() => "minmax(3.25rem, 5.25rem)"),
+          ].join(" ");
+          const visibleModels = showAllRanks ? dataset.models : dataset.models.slice(0, 3);
+          const moreCount = Math.max(0, dataset.models.length - 3);
+          return (
           <div
             key={dataset.name || index}
             className="flex flex-col w-full bg-[#0d1421] rounded-2xl border border-gray-800/80 hover:border-[#defe47]/30 transition-all duration-200 shadow-xl shadow-black/20 overflow-hidden group"
@@ -1178,7 +1297,7 @@ const Leaderboard = () => {
                 </h2>
                 {(dataset.task_type || dataset.evaluation_metric) && (
                   <span className="mt-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-800/80 text-[11px] text-gray-400 font-medium border border-gray-700/50">
-                    {[dataset.task_type, dataset.evaluation_metric].filter(Boolean).join(" · ")}
+                    {[humanizeMetricKey(dataset.task_type), humanizeMetricKey(dataset.evaluation_metric)].filter(Boolean).join(" · ")}
                   </span>
                 )}
               </div>
@@ -1195,6 +1314,7 @@ const Leaderboard = () => {
                   </a>
                 )}
                 <button
+                  type="button"
                   className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#28b2fb] hover:border-[#28b2fb]/30 transition-colors"
                   onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
                 >
@@ -1203,30 +1323,61 @@ const Leaderboard = () => {
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2 px-5 py-2 border-b border-gray-800/40 bg-[#0a101a]/90">
+              <button
+                type="button"
+                className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-700 text-gray-400 hover:text-[#28b2fb] hover:border-[#28b2fb]/40 transition-colors"
+                onClick={() => setAdvancedMetrics((prev) => ({ ...prev, [dkey]: !prev[dkey] }))}
+              >
+                {showAdv ? "Hide advanced metrics" : "Advanced metrics"}
+              </button>
+              {dataset.models.length > 3 && (
+                <button
+                  type="button"
+                  className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-700 text-gray-400 hover:text-[#defe47] hover:border-[#defe47]/40 transition-colors"
+                  onClick={() => setExpandedRankDepth((prev) => ({ ...prev, [dkey]: !prev[dkey] }))}
+                >
+                  {showAllRanks ? "Show top 3 only" : `Show ${moreCount} more`}
+                </button>
+              )}
+            </div>
+
             {/* Rankings table */}
-            <div className="flex-1">
-              <div className="grid grid-cols-[3rem_1fr_6rem] text-[10px] font-semibold uppercase tracking-widest text-gray-600 px-5 py-2.5 border-b border-gray-800/40">
+            <div className="flex-1 overflow-x-auto">
+              <div
+                className="text-[10px] font-semibold uppercase tracking-widest text-gray-600 px-5 py-2.5 border-b border-gray-800/40 gap-x-2"
+                style={{ display: "grid", gridTemplateColumns, alignItems: "center" }}
+              >
                 <div>Rank</div>
                 <div>Model</div>
-                <div className="text-right">Score</div>
+                <div
+                  className="text-right"
+                  title="Weighted aggregate (0–100) over reported metrics; hover a row for the breakdown."
+                >
+                  Score
+                </div>
+                {extras.map((ek) => (
+                  <div key={ek} className="text-right truncate" title={ek}>
+                    {humanizeMetricKey(ek)}
+                  </div>
+                ))}
               </div>
 
-              <div className="divide-y divide-gray-800/30">
-                {dataset.models.map((model, modelIndex) => {
+              <div className="divide-y divide-gray-800/30 min-w-0">
+                {visibleModels.map((model, modelIndex) => {
                   const isTop = model.rank === 1;
-                  const score = typeof model.score === 'number'
-                    ? model.score.toFixed(model.score < 1 ? 3 : 2)
-                    : model.score;
                   const metricsLine = formatMetricsSummary(model.detailed_scores);
+                  const agg = formatAggregateScore(model);
                   return (
                     <div
                       key={modelIndex}
                       className={[
-                        "grid grid-cols-[3rem_1fr_6rem] items-center px-5 py-2.5 text-sm transition-colors",
+                        "items-center px-5 py-2.5 text-sm transition-colors gap-x-2",
                         isTop
                           ? "bg-[#defe47]/[0.04] hover:bg-[#defe47]/[0.08]"
-                          : "hover:bg-white/[0.03]"
-                      ].join(' ')}
+                          : "hover:bg-white/[0.03]",
+                      ].join(" ")}
+                      style={{ display: "grid", gridTemplateColumns, alignItems: "center" }}
                     >
                       <div className="font-semibold text-gray-400 flex items-center gap-1">
                         {rankBadge(model.rank)}
@@ -1238,12 +1389,12 @@ const Leaderboard = () => {
                       </div>
                       <div className="min-w-0">
                         <div
-                          className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(' ')}
+                          className={["font-medium truncate", isTop ? "text-white" : "text-gray-300"].join(" ")}
                           title={model.model}
                         >
                           {model.model}
                         </div>
-                        {metricsLine && (
+                        {!showAdv && extras.length === 0 && metricsLine && (
                           <div
                             className="text-[10px] text-gray-500 mt-0.5 truncate font-mono"
                             title={metricsLine}
@@ -1253,11 +1404,14 @@ const Leaderboard = () => {
                         )}
                       </div>
                       <div className="text-right">
-                        <span className={[
-                          "tabular-nums font-semibold",
-                          isTop ? "text-[#defe47]" : model.rank === 2 ? "text-gray-100" : "text-gray-400"
-                        ].join(' ')}>
-                          {score}
+                        <span
+                          className={[
+                            "tabular-nums font-semibold",
+                            isTop ? "text-[#defe47]" : model.rank === 2 ? "text-gray-100" : "text-gray-400",
+                          ].join(" ")}
+                          title={compositeTooltip(model) || undefined}
+                        >
+                          {agg}
                         </span>
                         {model.primary_metric && (
                           <div className="text-[10px] text-gray-600 leading-none mt-0.5">{model.primary_metric}</div>
@@ -1266,13 +1420,19 @@ const Leaderboard = () => {
                           <div className="text-[10px] text-gray-600 leading-none mt-0.5">{model.ci}</div>
                         )}
                       </div>
+                      {extras.map((ek) => (
+                        <div key={ek} className="text-right tabular-nums text-[11px] text-gray-400">
+                          {formatMetricCell(model.detailed_scores?.[ek])}
+                        </div>
+                      ))}
                     </div>
                   );
                 })}
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {viewMode === "live" && nextCursor && !loading && (

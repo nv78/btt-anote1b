@@ -21,6 +21,23 @@ except ImportError:
     from backend.auth_helpers import jwt_sub_from_request, resolve_submitter_id
 
 try:
+    from ui_fallback_dataset_catalog import UI_FALLBACK_DATASETS_BY_LOWER_NAME
+except ImportError:
+    try:
+        from backend.ui_fallback_dataset_catalog import UI_FALLBACK_DATASETS_BY_LOWER_NAME
+    except ImportError:
+        UI_FALLBACK_DATASETS_BY_LOWER_NAME = {}
+
+try:
+    from composite_score import enrich_leaderboard_list
+except ImportError:
+    try:
+        from backend.composite_score import enrich_leaderboard_list
+    except ImportError:
+        def enrich_leaderboard_list(entries):  # type: ignore
+            return entries
+
+try:
     from pagination import (
         decode_cursor,
         leaderboard_cursor_decode,
@@ -555,7 +572,7 @@ def get_leaderboard():
 
             rows = cursor.fetchall()
             r0 = rank_start if use_cursor else offset + 1
-            leaderboard = _rows_to_leaderboard(rows, r0)
+            leaderboard = enrich_leaderboard_list(_rows_to_leaderboard(rows, r0))
             out = {
                 "success": True,
                 "leaderboard": leaderboard,
@@ -630,6 +647,7 @@ def get_leaderboard():
             "primary_metric": ev_details.get("metric"),
             "submitted_at": sub["created"].isoformat(),
         })
+    leaderboard = enrich_leaderboard_list(leaderboard)
     out = {
         "success": True,
         "leaderboard": leaderboard,
@@ -1729,7 +1747,21 @@ def dataset_details():
             "url": None,
         }
     if not matched:
+        matched = UI_FALLBACK_DATASETS_BY_LOWER_NAME.get(name_lower)
+    if not matched:
         return jsonify({"success": False, "error": "Dataset not found"}), 404
+
+    fb_static = UI_FALLBACK_DATASETS_BY_LOWER_NAME.get(name_lower)
+    if fb_static:
+        matched = {
+            **fb_static,
+            **matched,
+            "evaluation_metric": matched.get("evaluation_metric") or fb_static.get("evaluation_metric"),
+            "task_type": matched.get("task_type") or fb_static.get("task_type"),
+            "url": matched.get("url") or fb_static.get("url"),
+            "description": matched.get("description") or fb_static.get("description"),
+            "name": matched.get("name") or fb_static.get("name"),
+        }
 
     mem = []
     for ev in _STORE['evaluations']:
