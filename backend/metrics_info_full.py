@@ -6,6 +6,8 @@ Provides detailed explanations for all evaluation metrics used in the leaderboar
 METRICS_CATALOG is aligned with Personal/metrics_info.py; metrics_for_task() here is the Flask helper.
 """
 
+from typing import Optional
+
 METRICS_CATALOG = {
     # Classification Metrics
     "accuracy": {
@@ -544,6 +546,30 @@ METRICS_CATALOG = {
 }
 
 
+def normalize_task_type_for_metrics(task_type: Optional[str]) -> str:
+    """Normalize labels so metrics lines up with ``get_metrics_for_task`` keys."""
+    if not task_type:
+        return "translation"
+    t = str(task_type).lower().strip().replace(" ", "_").replace("-", "_")
+    aliases = {
+        "ner": "named_entity_recognition",
+        "qa": "document_qa",
+        "chatbot": "document_qa",
+        "prompting": "line_qa",
+        "multiclass": "text_classification",
+        "classification": "text_classification",
+    }
+    return aliases.get(t, t)
+
+
+def primary_metric_catalog_entry(metric_key: Optional[str]) -> dict:
+    """Rich catalog entry for the dataset's primary ``evaluation_metric``."""
+    if metric_key is None or metric_key == "":
+        return {}
+    mk = str(metric_key).lower().strip()
+    return dict(METRICS_CATALOG.get(mk) or get_metric_info(mk))
+
+
 def get_metric_info(metric_name: str) -> dict:
     """Get information about a specific metric."""
     return METRICS_CATALOG.get(
@@ -588,7 +614,8 @@ def get_metrics_for_task(task_type: str) -> list:
 
 def metrics_for_task(task_type: str) -> dict:
     """Flask-compatible: metric_key -> catalog entry (subset with rich docs)."""
-    keys = get_metrics_for_task(task_type or "")
+    nt = normalize_task_type_for_metrics(task_type)
+    keys = get_metrics_for_task(nt)
     out: dict = {}
     for k in keys:
         if k in METRICS_CATALOG:

@@ -247,21 +247,33 @@ except Exception:
     csv_bench = None
 
 try:
-    from metrics_info_full import METRICS_CATALOG, metrics_for_task  # type: ignore
+    from metrics_info_full import (  # type: ignore
+        METRICS_CATALOG,
+        metrics_for_task,
+        normalize_task_type_for_metrics,
+        primary_metric_catalog_entry,
+    )
 except Exception:
     try:
-        from backend.metrics_info_full import METRICS_CATALOG, metrics_for_task  # type: ignore
+        from backend.metrics_info_full import (  # type: ignore
+            METRICS_CATALOG,
+            metrics_for_task,
+            normalize_task_type_for_metrics,
+            primary_metric_catalog_entry,
+        )
     except Exception:
-        try:
-            from metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
-        except Exception:
-            try:
-                from backend.metrics_info import METRICS_CATALOG, metrics_for_task  # type: ignore
-            except Exception:
-                METRICS_CATALOG = {}
+        METRICS_CATALOG = {}
 
-                def metrics_for_task(_task_type):
-                    return {}
+        def metrics_for_task(_task_type):
+            return {}
+
+        def normalize_task_type_for_metrics(t):
+            if not t:
+                return "translation"
+            return str(t).lower().strip().replace(" ", "_").replace("-", "_")
+
+        def primary_metric_catalog_entry(_m):
+            return {}
 
 
 # Root welcome endpoint for quick sanity check
@@ -1613,62 +1625,81 @@ def add_dataset_public():
             pass
 
 
+def _dataset_details_payload(dataset_core: dict, top_models: list) -> dict:
+    """Attach normalized task type, primary metric docs, and per-task metric catalog."""
+    tt = dataset_core.get("task_type") or "translation"
+    em = dataset_core.get("evaluation_metric") or ""
+    tn = normalize_task_type_for_metrics(tt)
+    pmd = primary_metric_catalog_entry(em)
+    rec = metrics_for_task(tn)
+    dataset_out = {
+        **dataset_core,
+        "task_type_normalized": tn,
+        "primary_metric_documentation": pmd,
+        "recommended_metrics_for_task": rec,
+    }
+    return {"success": True, "dataset": dataset_out, "top_models": top_models}
+
+
 @app.get('/public/dataset_details')
 def dataset_details():
     """Return detailed information about a dataset, including curation meta and top models."""
-    name = request.args.get('name')
-    if not name:
+    raw = request.args.get('name')
+    if not raw:
         return jsonify({"success": False, "error": "Missing name"}), 400
+    name = raw.strip()
+    name_lower = name.lower()
 
-    # Try DB first
     conn, cursor = get_db_connection()
     if conn and cursor:
         try:
-            cursor.execute("SELECT id, name, task_type, evaluation_metric, reference_data, created, active FROM benchmark_datasets WHERE name = %s", (name,))
-            ds = cursor.fetchone()
-            if not ds:
-                return jsonify({"success": False, "error": "Dataset not found"}), 404
-            meta = {}
-            examples = []
-            count = None
-            try:
-                rd = json.loads(ds['reference_data']) if isinstance(ds['reference_data'], str) else ds['reference_data']
-                if isinstance(rd, dict):
-                    meta['url'] = rd.get('url')
-                    meta['description'] = rd.get('description')
-                    if isinstance(rd.get('source_texts'), list):
-                        examples = rd['source_texts'][:5]
-                        count = len(rd['source_texts'])
-            except Exception:
-                pass
-
-            # Top models for this dataset
             cursor.execute(
-                "SELECT ms.model_name, er.score, ms.created as submitted_at "
-                "FROM model_submissions ms JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                "WHERE ms.benchmark_dataset_id = %s ORDER BY er.score DESC LIMIT 10",
-                (ds['id'],)
+                "SELECT id, name, task_type, evaluation_metric, reference_data, created, active "
+                "FROM benchmark_datasets WHERE name = %s OR LOWER(TRIM(name)) = LOWER(TRIM(%s))",
+                (name, name),
             )
-            rows = cursor.fetchall()
-            top_models = [
-                {
-                    "model": r['model_name'],
-                    "score": float(r['score']),
-                    "updated": r['submitted_at'].isoformat() if r.get('submitted_at') else None
-                } for r in rows
-            ]
-            return jsonify({
-                "success": True,
-                "dataset": {
+            ds = cursor.fetchone()
+            if ds:
+                meta = {}
+                examples = []
+                count = None
+                try:
+                    rd = json.loads(ds['reference_data']) if isinstance(ds['reference_data'], str) else ds['reference_data']
+                    if isinstance(rd, dict):
+                        meta['url'] = rd.get('url')
+                        meta['description'] = rd.get('description')
+                        if isinstance(rd.get('source_texts'), list):
+                            examples = rd['source_texts'][:5]
+                            count = len(rd['source_texts'])
+                except Exception:
+                    pass
+
+                cursor.execute(
+                    "SELECT ms.model_name, er.score, ms.created as submitted_at "
+                    "FROM model_submissions ms JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                    "WHERE ms.benchmark_dataset_id = %s ORDER BY er.score DESC LIMIT 10",
+                    (ds['id'],),
+                )
+                rows = cursor.fetchall()
+                top_models = [
+                    {
+                        "model": r['model_name'],
+                        "score": float(r['score']),
+                        "updated": r['submitted_at'].isoformat() if r.get('submitted_at') else None,
+                    }
+                    for r in rows
+                ]
+                core = {
                     "name": ds['name'],
                     "task_type": ds['task_type'],
                     "evaluation_metric": ds['evaluation_metric'],
                     **meta,
                     "size": count,
                     "examples": examples,
-                },
-                "top_models": top_models,
-            })
+                }
+                return jsonify(_dataset_details_payload(core, top_models))
+        except Exception as e:
+            logger.exception("dataset_details_db_error", extra={"error": str(e)})
         finally:
             try:
                 cursor.close()
@@ -1676,9 +1707,8 @@ def dataset_details():
             except Exception:
                 pass
 
-    # Fallback: find in curated list and memory submissions
-    matched = next((d for d in LEADERBOARD_DATA if d.get('name') == name), None)
-    stored = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+    matched = next((d for d in LEADERBOARD_DATA if (d.get('name') or '').lower() == name_lower), None)
+    stored = next((d for d in _STORE["datasets"] if (d.get("name") or "").lower() == name_lower), None)
     if stored:
         rd = stored.get("reference_data") if isinstance(stored.get("reference_data"), dict) else {}
         matched = {
@@ -1690,31 +1720,34 @@ def dataset_details():
             "size": len(rd.get("source_texts", [])) if isinstance(rd.get("source_texts"), list) else None,
             "examples": rd.get("source_texts", [])[:5] if isinstance(rd.get("source_texts"), list) else [],
         }
-    if not matched and name.startswith('flores_spanish_translation'):
-        matched = {"name": name, "task_type": "translation", "evaluation_metric": "bleu", "description": "FLORES-style demo", "url": None}
+    if not matched and name_lower.startswith('flores_spanish_translation'):
+        matched = {
+            "name": name,
+            "task_type": "translation",
+            "evaluation_metric": "bleu",
+            "description": "FLORES-style demo",
+            "url": None,
+        }
     if not matched:
         return jsonify({"success": False, "error": "Dataset not found"}), 404
-    # Gather top models from memory store
+
     mem = []
     for ev in _STORE['evaluations']:
         sub = next((s for s in _STORE['submissions'] if s['id'] == ev['submission_id']), None)
-        if sub and sub['benchmark_dataset_name'] == name:
+        if sub and (sub.get('benchmark_dataset_name') or '').lower() == name_lower:
             mem.append({"model": sub['model_name'], "score": ev['score'], "updated": sub['created'].isoformat()})
     mem.sort(key=lambda x: x['score'], reverse=True)
     examples = matched.get("examples") or _SPANISH_REFERENCES[:5]
-    return jsonify({
-        "success": True,
-        "dataset": {
-            "name": matched.get('name'),
-            "task_type": matched.get('task_type', 'translation'),
-            "evaluation_metric": matched.get('evaluation_metric', 'bleu'),
-            "url": matched.get('url'),
-            "description": matched.get('description'),
-            "size": None,
-            "examples": examples,
-        },
-        "top_models": mem[:10],
-    })
+    core = {
+        "name": matched.get('name'),
+        "task_type": matched.get('task_type', 'translation'),
+        "evaluation_metric": matched.get('evaluation_metric', 'bleu'),
+        "url": matched.get('url'),
+        "description": matched.get('description'),
+        "size": matched.get("size"),
+        "examples": examples,
+    }
+    return jsonify(_dataset_details_payload(core, mem[:10]))
 
 
 @app.get('/api/metrics')
@@ -1726,7 +1759,13 @@ def list_metrics():
 @app.get('/api/metrics/task/<task_type>')
 def list_task_metrics(task_type):
     """Return recommended metrics for a specific task type."""
-    return jsonify({"success": True, "task_type": task_type, "metrics": metrics_for_task(task_type)})
+    nt = normalize_task_type_for_metrics(task_type)
+    return jsonify({
+        "success": True,
+        "task_type": task_type,
+        "task_type_normalized": nt,
+        "metrics": metrics_for_task(task_type),
+    })
 
 
 @app.get("/public/auth/google/start")
