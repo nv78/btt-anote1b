@@ -259,45 +259,36 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 
 ## Current state of the codebase (May 2026)
 
+> See `TODO.md` for the full prioritized production-readiness checklist.
+
 ### What works
-- Full leaderboard UI with live API + curated demo cards fallback
-- Composite 0–100 scoring aggregated from all reported metrics
-- Per-card **Advanced metrics** toggle showing full glossary table with per-model values
-- **Show top 3 / Show more** rank expansion per leaderboard card
-- `GET /dataset/:name` details page with primary metric docs + full task glossary
-- Dataset details resolves correctly for demo cards (no longer 404s) via `ui_fallback_dataset_catalog`
-- All 5 evaluator classes (classification, NER, QA, retrieval, translation)
-- Google OAuth flow wired; redirect URI derived from request (no static env override)
-- Auth guards on `/submit`, `/my-submissions`, `/admin/*`
-- Keyset pagination on leaderboard
-- python-dotenv loaded automatically; monorepo root `.env` merged in
+- **Leaderboard auto-seeds on first request** — 25 entries appear immediately; no manual seeding step
+- **Live data + demo fallback** — "Demo" chip badge + API failure banner when API is empty/unreachable
+- **Loading skeleton cards** + **Refresh button** in `Leaderboard.js`
+- **SQLite persistence** — data survives restarts without MySQL (`SQLITE_DB_PATH=./leaderboard.db`)
+- **Composite 0–100 scoring** from all reported metrics (`composite_score.py`)
+- **Advanced metrics panel** — grouped/collapsible (Core, Precision/Recall, Semantic overlap, Ranking, Translation) with formula pills and range badges (`TaskAdvancedMetricsPanel.js`)
+- **Show top 3 / Show more** per leaderboard card
+- **Dataset Details page** never 404s for demo cards (`ui_fallback_dataset_catalog.py`)
+- **All 5 evaluator classes** (TextClassification, NER, QA, Retrieval, Translation) in `eval_core/evaluators.py`
+- **`GET /public/dataset_questions`** — returns unlabeled inputs for submission pipeline
+- **Daily submission quota** via `DAILY_SUBMISSION_LIMIT` env var + `X-Submissions-Remaining` header
+- **`POST /public/run_hf_model`** — sync/async HF model evaluation (requires `transformers`)
+- **`/create-leaderboard` wizard** — import a HF dataset + optionally run a HF model
+- **Blueprint structure** — routes split across 6 focused files; `app.py` ~250 lines
+- **`eval_core` lazy imports** — no numpy segfault on macOS
+- **Collapsible submission format block** in `SubmitToLeaderboard.js`
+- **Full metric breakdown per submission** in `MySubmissions.js`
+- **29 tests passing** in `backend/tests/`
 
-### What is deferred / incomplete (TODO)
+### What is deferred / incomplete
 
-#### Auth
-- **`GOOGLE_CLIENT_SECRET` is empty** in `backend/.env` — Google OAuth will fail at token exchange. Get from Google Cloud Console → Credentials.
-- **`LEADERBOARD_JWT_SECRET` is a placeholder** — replace with `openssl rand -hex 32`.
-- Add both `http://localhost:5001/public/auth/google/callback` **and** `http://127.0.0.1:5001/public/auth/google/callback` to Google Console → Authorized redirect URIs.
-- OAuth consent screen is in "Testing" mode — add test users or publish.
+See `TODO.md` for the full prioritized checklist. Top blockers:
 
-#### UI polish
-- Leaderboard card badge for task type / evaluation metric is tiny text — could be improved.
-- No empty state illustration when `liveDatasets` is empty.
-- `SubmitToLeaderboard.js` has many unused state variables (no-unused-vars linter warnings that were pre-existing).
-
-#### Backend
-- No async background job queue for long submissions; `eval_jobs` API stub exists but jobs are currently synchronous.
-- SQLite schema migrations are manual; optional MySQL remains supported but no Alembic or similar exists.
-- No rate-limiting on read endpoints; only write endpoints are rate-limited.
-
-#### Testing
-- `pytest/` (older folder) and `tests/` (newer folder) coexist — CI runs `tests/`. The `pytest/` integration tests require a live API and are not in CI.
-- No frontend tests (React Testing Library / Cypress).
-- End-to-end OAuth flow is untested.
-
-#### Deployment
-- `docker-compose.yml` exists but hasn't been validated with the current `app.py` startup (dotenv + monorepo path detection).
-- Frontend `.env.development` still points at `:5000` (should be `:5001`) — override manually or update the file.
+- **Auth secrets missing** — `GOOGLE_CLIENT_SECRET`, `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY`, `LEADERBOARD_ADMIN_API_KEYS` all unset in `backend/.env`
+- **`frontend/.env.development` wrong port** — points at `:5005`, should be `:5001`
+- **Submission pipeline untested end-to-end** — demo datasets have no `reference_data.ground_truth`; need a real HF dataset import to test the full flow
+- **`docker-compose.yml` uses MySQL** but SQLite is now the default
 
 ---
 
@@ -365,14 +356,20 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 
 ## Open issues / known bugs (as of May 2026)
 
+> Full checklist with file locations is in `TODO.md`.
+
 | Issue | Location | Priority |
 |-------|----------|----------|
-| Google OAuth broken — no client secret | `backend/.env` | High |
-| JWT secret is placeholder | `backend/.env` | High |
-| Frontend `.env.development` points to `:5000` not `:5001` | `frontend/.env.development` | Low |
+| Google OAuth broken — `GOOGLE_CLIENT_SECRET` missing | `backend/.env` | High |
+| `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY` are placeholders | `backend/.env` | High |
+| `LEADERBOARD_ADMIN_API_KEYS` unset — seed route returns 503 | `backend/.env` | High |
+| `frontend/.env.development` points to `:5005` not `:5001` | `frontend/.env.development` | High |
+| Demo datasets have no `reference_data.ground_truth` — submission pipeline untested | `blueprints/leaderboard.py` seed data | Medium |
+| `docker-compose.yml` uses MySQL; SQLite is now the default | `docker-compose.yml` | Medium |
 | No frontend tests | — | Low |
 | `SubmitToLeaderboard.js` has ~20 unused state variables | `frontend/…/SubmitToLeaderboard.js` | Low |
-| Async eval job queue is stub only | `backend/blueprints/submissions.py` + `backend/blueprints/eval.py` | Low |
+| Async eval job queue is stub only | `blueprints/submissions.py` + `blueprints/eval.py` | Low |
+| `/create-leaderboard` link not exposed in nav | `HeaderBar.js` | Low |
 
 ---
 
