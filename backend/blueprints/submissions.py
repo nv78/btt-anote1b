@@ -117,15 +117,27 @@ def submit_model():
                             rows = [gtlist[int(i)] for i in sentence_ids]
                             _tt = (task_type or '').lower()
                             if not reference_labels and _tt == 'text_classification':
-                                reference_labels = [r.get('answer') for r in rows]
+                                reference_labels = [
+                                    r.get('answer') if isinstance(r, dict) else r
+                                    for r in rows
+                                ]
                             if not reference_entities and _tt in ('ner', 'named_entity_recognition'):
-                                reference_entities = [r.get('answer') for r in rows]
+                                reference_entities = [
+                                    r.get('answer') if isinstance(r, dict) else r
+                                    for r in rows
+                                ]
                             if not reference_answers and _tt in (
                                 'chatbot', 'prompting', 'qa', 'document_qa', 'line_qa',
                             ):
-                                reference_answers = [r.get('answer') for r in rows]
+                                reference_answers = [
+                                    r.get('answer') if isinstance(r, dict) else r
+                                    for r in rows
+                                ]
                             if not reference_sentences and _tt in ('translation', ''):
-                                reference_sentences = [r.get('answer') for r in rows]
+                                reference_sentences = [
+                                    r.get('answer') if isinstance(r, dict) else r
+                                    for r in rows
+                                ]
                     except Exception:
                         pass
         except Exception:

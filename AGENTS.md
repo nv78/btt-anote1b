@@ -287,7 +287,7 @@ See `TODO.md` for the full prioritized checklist. Top blockers:
 
 - **Auth secrets missing** — `GOOGLE_CLIENT_SECRET`, `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY`, `LEADERBOARD_ADMIN_API_KEYS` all unset in `backend/.env`
 - **`frontend/.env.development` wrong port** — points at `:5005`, should be `:5001`
-- **Submission pipeline untested end-to-end** — demo datasets have no `reference_data.ground_truth`; need a real HF dataset import to test the full flow
+- **Manual browser submission flow still needs QA** — API-level e2e tests cover the runnable `SST-2 Sentiment (Sample)` dataset, but the full UI click path still needs manual verification
 - **`docker-compose.yml` uses MySQL** but SQLite is now the default
 
 ---
@@ -364,7 +364,7 @@ See `TODO.md` for the full prioritized checklist. Top blockers:
 | `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY` are placeholders | `backend/.env` | High |
 | `LEADERBOARD_ADMIN_API_KEYS` unset — seed route returns 503 | `backend/.env` | High |
 | `frontend/.env.development` points to `:5005` not `:5001` | `frontend/.env.development` | High |
-| Demo datasets have no `reference_data.ground_truth` — submission pipeline untested | `blueprints/leaderboard.py` seed data | Medium |
+| Full UI submission flow needs manual QA | `SubmitToLeaderboard.js` + `MySubmissions.js` | Medium |
 | `docker-compose.yml` uses MySQL; SQLite is now the default | `docker-compose.yml` | Medium |
 | No frontend tests | — | Low |
 | `SubmitToLeaderboard.js` has ~20 unused state variables | `frontend/…/SubmitToLeaderboard.js` | Low |

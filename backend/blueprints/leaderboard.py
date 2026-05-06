@@ -62,11 +62,21 @@ def _questions_from_reference_data(reference_data: object) -> list[dict[str, Any
 
     ground_truth = reference_data.get("ground_truth")
     if isinstance(ground_truth, list) and ground_truth:
+        if not all(isinstance(row, dict) for row in ground_truth):
+            source_texts = reference_data.get("source_texts")
+            if isinstance(source_texts, list):
+                contexts = reference_data.get("contexts") if isinstance(reference_data.get("contexts"), list) else []
+                return [
+                    {
+                        "id": idx,
+                        "input": str(text),
+                        "context": str(contexts[idx]) if idx < len(contexts) and contexts[idx] is not None else None,
+                    }
+                    for idx, text in enumerate(source_texts)
+                ]
+            return []
         items = []
         for idx, row in enumerate(ground_truth):
-            if not isinstance(row, dict):
-                items.append({"id": idx, "input": str(row), "context": None})
-                continue
             input_text = (
                 row.get("input")
                 or row.get("question")
@@ -955,11 +965,13 @@ def _seed_builtin_leaderboard_data() -> dict[str, int]:
                 "task_type": dataset["task_type"],
                 "evaluation_metric": dataset["evaluation_metric"],
                 "url": dataset["url"],
-                "description": f"Seeded benchmark card for {dataset['name']}.",
+                "description": dataset.get("description", f"Seeded benchmark card for {dataset['name']}."),
+                "source_texts": (dataset.get("reference_data") or {}).get("source_texts", []),
+                "ground_truth": (dataset.get("reference_data") or {}).get("ground_truth", []),
             },
         ):
             dataset_fn()
-        for model in dataset["models"]:
+        for model in dataset.get("models", []):
             payload = {
                 **model,
                 "dataset_name": dataset["name"],
@@ -980,7 +992,7 @@ def _seed_builtin_leaderboard_data() -> dict[str, int]:
 @bp.post('/api/leaderboard/seed')
 @require_admin
 def seed_leaderboard_data() -> Any:
-    """Seed the 10 benchmark datasets used by the frontend fallback cards."""
+    """Seed built-in benchmark datasets and runnable samples."""
     return jsonify(_seed_builtin_leaderboard_data())
 
 

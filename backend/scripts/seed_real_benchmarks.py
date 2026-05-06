@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed the public leaderboard API with the 10 real benchmark cards shown in the UI.
+"""Seed the public leaderboard API with the benchmark cards shown in the UI plus runnable samples.
 
 Usage:
   LEADERBOARD_API_BASE=http://127.0.0.1:5001 LEADERBOARD_API_KEY=... \
@@ -161,6 +161,39 @@ DATASETS: List[Dict[str, Any]] = [
             {"rank": 8, "model": "Qwen2VL 7B Instruct", "score": 475.25, "updated": "Feb 2025"},
         ],
     },
+    {
+        "name": "SST-2 Sentiment (Sample)",
+        "task_type": "text_classification",
+        "evaluation_metric": "accuracy",
+        "url": "https://huggingface.co/datasets/nyu-mll/glue",
+        "description": "Stanford Sentiment Treebank binary sentiment classification. 20-sample subset.",
+        "reference_data": {
+            "source_texts": [
+                "hide new secretions from the parental units",
+                "contains no wit , only labored gags",
+                "that loves its characters and communicates something rather beautiful about human nature",
+                "remains utterly satisfied to remain the same throughout",
+                "on the worst revenge-of-the-nerds clichés the filmmakers could dredge up",
+                "a depressed fifteen-year-old 's suicidal poetry",
+                "demonstrates that the director of such hollywood blockbusters as patriot games can still turn out a small , personal film with an emotional wallop .",
+                "the film quickly drags on becoming boring and predictable .",
+                "rule of thumb : any film where the director shows up for a cameo is a bad film .",
+                "a feast for the eyes and a film that will leave you with a warm glow in your heart",
+                "an enormously entertaining and funny film .",
+                "a nearly perfect film .",
+                "it 's a bit disappointing to see a film that had such potential simply not pan out .",
+                "this is the sort of film that makes you want to check your brain at the door .",
+                "the film is a pleasant enough diversion .",
+                "it 's a lovely , funny , moving film .",
+                "watching it is like being caught in a bad dream from which there 's no escape .",
+                "the movie is a disaster .",
+                "a dazzling , engrossing film .",
+                "the kind of film that makes you feel glad to be alive .",
+            ],
+            "ground_truth": [0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1],
+        },
+        "models": [],
+    },
 ]
 
 
@@ -238,10 +271,12 @@ def main() -> None:
                 "task_type": dataset["task_type"],
                 "evaluation_metric": dataset["evaluation_metric"],
                 "url": dataset["url"],
-                "description": f"Seeded benchmark card for {dataset['name']}.",
+                "description": dataset.get("description", f"Seeded benchmark card for {dataset['name']}."),
+                "source_texts": (dataset.get("reference_data") or {}).get("source_texts", []),
+                "ground_truth": (dataset.get("reference_data") or {}).get("ground_truth", []),
             },
         )
-        for model in dataset["models"]:
+        for model in dataset.get("models", []):
             payload = {
                 **model,
                 "dataset_name": dataset["name"],

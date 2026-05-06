@@ -121,7 +121,7 @@ def test_seed_real_benchmarks_persist_in_sqlite(monkeypatch, tmp_path):
         data = r.get_json()
         assert data["success"] is True
         rows = data["leaderboard"]
-        seeded_names = {dataset["name"] for dataset in DATASETS}
+        seeded_names = {dataset["name"] for dataset in DATASETS if dataset.get("models")}
         assert len(rows) == sum(len(dataset["models"]) for dataset in DATASETS)
         assert seeded_names <= {row["dataset_name"] for row in rows}
 
@@ -216,7 +216,7 @@ def test_admin_seed_route_populates_leaderboard(monkeypatch):
         r = c.post("/api/leaderboard/seed", headers={"X-Admin-Key": "admin"})
         assert r.status_code == 200
         data = r.get_json()
-        assert data["seeded"] == 10
+        assert data["seeded"] == len(DATASETS)
         assert data["models_added"] == sum(len(dataset["models"]) for dataset in DATASETS)
 
         r = c.get("/public/get_leaderboard?page_size=100")
