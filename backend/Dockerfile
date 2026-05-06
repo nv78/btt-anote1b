@@ -2,12 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+COPY . .
 
-COPY . /app/backend
+RUN pip install --no-cache-dir -r requirements.txt
 
 ENV PORT=5001
 EXPOSE 5001
 
-CMD ["python", "backend/app.py"]
+CMD ["python", "app.py"]

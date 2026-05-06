@@ -1,29 +1,15 @@
 services:
-  db:
-    image: mysql:8
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: agents
-    ports:
-      - "3306:3306"
-    volumes:
-      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
-
   backend:
     build: ./backend
     environment:
       PORT: 5001
       FLASK_ENV: development
       ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
-      DB_HOST: db
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: agents
-      DB_PORT: 3306
+      SQLITE_DB_PATH: /data/leaderboard.db
     ports:
       - "5001:5001"
-    depends_on:
-      - db
+    volumes:
+      - leaderboard_data:/data
 
   frontend:
     build: ./frontend
@@ -33,3 +19,6 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+
+volumes:
+  leaderboard_data:

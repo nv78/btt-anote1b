@@ -18,8 +18,8 @@ Last updated: May 2026. Check off items as they are completed.
 
 ## 🔴 Data & Persistence (blocking for production)
 
-- [ ] **`frontend/.env.development` points at wrong port** — currently `REACT_APP_API_BASE=http://127.0.0.1:5005`. Backend runs on `:5001` by default. Change to `http://127.0.0.1:5001`. File: `frontend/.env.development`.
-- [ ] **`docker-compose.yml` uses MySQL but SQLite is now default** — the compose file sets up a MySQL container but the backend defaults to SQLite (`leaderboard.db`). Either update compose to skip MySQL and mount a volume for the SQLite file, or document that MySQL is required for Docker deploys. File: `docker-compose.yml`.
+- [x] **`frontend/.env.development` points at wrong port** — fixed to `REACT_APP_API_BASE=http://127.0.0.1:5001`. File: `frontend/.env.development`.
+- [x] **`docker-compose.yml` uses MySQL but SQLite is now default** — fixed by removing MySQL and mounting `leaderboard_data` at `/data` with `SQLITE_DB_PATH=/data/leaderboard.db`. File: `docker-compose.yml`.
 - [x] **SQLite DB is gitignored** — `leaderboard.db` is in `.gitignore`, correct.
 - [x] **Auto-seed on empty DB** — verified working; `before_request` hook in `app.py` seeds 25 entries on first request.
 - [ ] **`_STORE` (RAM) still used as fallback** — submissions and evaluations that fail the DB write fall into `_STORE["submissions"]` / `_STORE["evaluations"]` and are lost on restart. Long-term: ensure all writes succeed to SQLite. File: `shared.py`.
@@ -57,9 +57,9 @@ Last updated: May 2026. Check off items as they are completed.
 
 ## 🟡 Deployment
 
-- [ ] **Update `docker-compose.yml`** for SQLite — remove MySQL service dependency or make it optional. Mount `./leaderboard.db` as a volume so data persists across container restarts.
-- [ ] **Validate `backend/Dockerfile`** — confirm it still works after the blueprint refactor (`app.py` is now thin; blueprints must be on the Python path).
-- [ ] **No Railway / Render config file** — there is no `railway.json` or `render.yaml`. Add one pointing at `python backend/app.py` with the required env vars listed.
+- [x] **Update `docker-compose.yml`** for SQLite — removed MySQL service/dependency and added the `leaderboard_data` volume.
+- [x] **Validate `backend/Dockerfile`** — Dockerfile now uses `WORKDIR /app`, `COPY . .`, `RUN pip install --no-cache-dir -r requirements.txt`, and `CMD ["python", "app.py"]`.
+- [x] **No Railway / Render config file** — added `railway.json` using the backend Dockerfile, `python app.py`, and `/health`.
 - [ ] **Frontend build must be served** — decide: serve the React build from Flask (add `send_from_directory` for `frontend/build/`) OR deploy frontend separately to Vercel/Netlify and set `ALLOWED_ORIGINS` accordingly.
 - [ ] **Production env vars checklist** — before deploying, all of these must be set:
   - `GOOGLE_CLIENT_ID`
