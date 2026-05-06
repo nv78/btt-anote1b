@@ -2893,10 +2893,7 @@ def _unwrapped_route(fn):
     return fn
 
 
-@app.post('/api/leaderboard/seed')
-@require_admin
-def seed_leaderboard_data() -> Any:
-    """Seed the 10 benchmark datasets used by the frontend fallback cards."""
+def _seed_builtin_leaderboard_data() -> dict[str, int]:
     try:
         from scripts.seed_real_benchmarks import DATASETS, detailed_scores  # type: ignore
     except ImportError:
@@ -2933,7 +2930,14 @@ def seed_leaderboard_data() -> Any:
             status_code = getattr(resp, "status_code", 200)
             if status_code < 400:
                 models_added += 1
-    return jsonify({"seeded": len(DATASETS), "models_added": models_added})
+    return {"seeded": len(DATASETS), "models_added": models_added}
+
+
+@app.post('/api/leaderboard/seed')
+@require_admin
+def seed_leaderboard_data() -> Any:
+    """Seed the 10 benchmark datasets used by the frontend fallback cards."""
+    return jsonify(_seed_builtin_leaderboard_data())
 
 
 @app.get('/api/leaderboard/list')
@@ -2979,6 +2983,66 @@ def list_benchmark_models():
     except Exception as e:
         print(f"list_benchmark_models error: {e}")
         return jsonify({"success": False, "error": "Model list unavailable"}), 500
+
+
+_AUTO_SEED_DONE = False
+_AUTO_SEED_LOCK = threading.Lock()
+
+
+def _truthy_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def _leaderboard_has_any_rows() -> bool:
+    if any((ds.get("models") or []) for ds in LEADERBOARD_DATA):
+        return True
+    if _STORE.get("evaluations"):
+        return True
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) AS total "
+                "FROM model_submissions ms "
+                "JOIN evaluation_results er ON er.model_submission_id = ms.id"
+            )
+            row = cursor.fetchone() or {}
+            return int(row.get("total", 0)) > 0
+        except Exception as e:
+            logger.warning("auto_seed_count_failed", extra={"error": str(e)})
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    return False
+
+
+@app.before_request
+def _auto_seed_once() -> None:
+    global _AUTO_SEED_DONE
+    if _AUTO_SEED_DONE:
+        return
+    if _truthy_env("DISABLE_LEADERBOARD_AUTO_SEED"):
+        _AUTO_SEED_DONE = True
+        return
+    if os.getenv("PYTEST_CURRENT_TEST") and not _truthy_env("LEADERBOARD_AUTO_SEED_IN_TESTS"):
+        return
+    with _AUTO_SEED_LOCK:
+        if _AUTO_SEED_DONE:
+            return
+        _AUTO_SEED_DONE = True
+        if _leaderboard_has_any_rows():
+            return
+        try:
+            summary = _seed_builtin_leaderboard_data()
+            logger.info("leaderboard_auto_seeded", extra=summary)
+        except Exception as e:
+            logger.exception("leaderboard_auto_seed_failed", extra={"error": str(e)})
 
 
 @app.post('/public/run_csv_benchmarks')

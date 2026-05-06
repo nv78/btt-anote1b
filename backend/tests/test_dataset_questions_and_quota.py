@@ -14,6 +14,7 @@ def reset_store() -> None:
     app_module._STORE["datasets"].clear()
     app_module._STORE.setdefault("submission_counts", {}).clear()
     app_module.LEADERBOARD_DATA.clear()
+    app_module._AUTO_SEED_DONE = False
 
 
 def test_dataset_questions_never_exposes_labels(monkeypatch):
@@ -222,3 +223,23 @@ def test_admin_seed_route_populates_leaderboard(monkeypatch):
         assert r.status_code == 200
         rows = r.get_json()["entries"]
         assert len(rows) >= data["models_added"]
+
+
+def test_auto_seed_once_on_first_request(monkeypatch):
+    from scripts.seed_real_benchmarks import DATASETS
+
+    monkeypatch.setenv("LEADERBOARD_AUTO_SEED_IN_TESTS", "1")
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
+    reset_store()
+
+    with app.test_client() as c:
+        r = c.get("/health")
+        assert r.status_code == 200
+        seeded_count = sum(len(dataset["models"]) for dataset in DATASETS)
+        assert len(app_module.LEADERBOARD_DATA) == len(DATASETS)
+        assert sum(len(ds.get("models", [])) for ds in app_module.LEADERBOARD_DATA) == seeded_count
+
+        r = c.get("/health")
+        assert r.status_code == 200
+        assert sum(len(ds.get("models", [])) for ds in app_module.LEADERBOARD_DATA) == seeded_count
