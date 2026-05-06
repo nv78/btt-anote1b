@@ -59,17 +59,26 @@ def main() -> None:
             sys.exit(1)
 
         for i, item in enumerate(gt):
-            if "question" not in item or "context" not in item:
-                print(f"ground_truth[{i}] missing question/context for id={item.get('id')!r}", file=sys.stderr)
+            if "question" not in item:
+                print(f"ground_truth[{i}] missing question for id={item.get('id')!r}", file=sys.stderr)
                 sys.exit(1)
 
-        from transformers import pipeline
+        from hf_runner_inference import load_extractive_qa_model, extractive_qa_answer
 
-        pipe = pipeline("question-answering", model=args.model_id, tokenizer=args.model_id)
+        tokenizer, qa_model, device = load_extractive_qa_model(args.model_id)
         predictions = []
         for item in gt:
-            out = pipe(question=item["question"], context=item["context"])
-            predictions.append({"id": item["id"], "prediction": out["answer"]})
+            ctx = item.get("context")
+            if ctx is None:
+                ctx = ""
+            answer = extractive_qa_answer(
+                tokenizer,
+                qa_model,
+                device,
+                str(item["question"]),
+                str(ctx),
+            )
+            predictions.append({"id": item["id"], "prediction": answer})
 
         gt_ids = {item["id"] for item in gt}
         if {p["id"] for p in predictions} != gt_ids:

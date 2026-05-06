@@ -44,9 +44,13 @@ def test_normalize_pos_neg_variants():
     assert normalize_hf_sentiment_label("LABEL_0") == "negative"
 
 
+def test_normalize_neutral_three_way():
+    assert normalize_hf_sentiment_label("NEUTRAL") == "neutral"
+
+
 def test_normalize_rejects_garbage():
     with pytest.raises(ValueError, match="Unexpected"):
-        normalize_hf_sentiment_label("NEUTRAL")
+        normalize_hf_sentiment_label("GARBAGE_LABEL_XYZ")
 
 
 def test_ground_truth_requires_sentence_for_sst2():

@@ -43,6 +43,8 @@ def normalize_hf_sentiment_label(raw: Union[str, Dict[str, Any]]) -> str:
         return "positive"
     if u in ("NEGATIVE", "LABEL_0", "NEG", "0"):
         return "negative"
+    if u in ("NEUTRAL", "NEU", "NEUT"):
+        return "neutral"
     raise ValueError(f"Unexpected sentiment label from model: {raw!r}")
 
 
@@ -136,3 +138,115 @@ def build_predictions_json(
             f"id count ({len(example_ids)}) != label count ({len(normalized_labels)})"
         )
     return [{"id": eid, "prediction": lab} for eid, lab in zip(example_ids, normalized_labels)]
+
+
+def _canonicalize_ag_news_textattack(label_lower: str) -> str:
+    """Map ``textattack/bert-base-uncased-ag-news`` LABEL_* ids to seed label strings."""
+    return {
+        "label_0": "world",
+        "label_1": "sports",
+        "label_2": "business",
+        "label_3": "sci/tech",
+    }.get(label_lower, label_lower)
+
+
+def run_text_classification_pipeline_batched(
+    model_id: str,
+    sentences: Sequence[str],
+    *,
+    batch_size: int = 8,
+    pipeline_factory: Optional[Callable[..., Any]] = None,
+) -> List[str]:
+    """
+    Generic sequence classification (HF ``text-classification`` pipeline).
+    Returns one lowercase label string per input (top-1).
+    """
+    if pipeline_factory is None:
+        check_transformers_torch()
+        from transformers import pipeline as hf_pipeline
+
+        pipeline_factory = hf_pipeline
+
+    pipe = pipeline_factory("text-classification", model=model_id, truncation=True)
+    out: List[str] = []
+    bs = max(1, int(batch_size))
+    for i in range(0, len(sentences), bs):
+        chunk = list(sentences[i : i + bs])
+        raw_results = pipe(chunk, batch_size=min(bs, len(chunk)))
+        if isinstance(raw_results, dict):
+            raw_results = [raw_results]
+        if not isinstance(raw_results, list):
+            raw_results = list(raw_results)
+        if len(raw_results) != len(chunk):
+            raise RuntimeError(
+                f"Pipeline returned {len(raw_results)} results for {len(chunk)} inputs"
+            )
+        for r in raw_results:
+            if isinstance(r, dict):
+                lab = r.get("label", "")
+            else:
+                lab = r
+            s = str(lab).strip().lower()
+            if s.startswith("label_") and hasattr(pipe, "model") and hasattr(pipe.model, "config"):
+                id2 = getattr(pipe.model.config, "id2label", None) or {}
+                try:
+                    idx = int(s.replace("label_", ""))
+                    if idx in id2:
+                        s = str(id2[idx]).strip().lower()
+                except ValueError:
+                    pass
+            if "bert-base-uncased-ag-news" in model_id:
+                s = _canonicalize_ag_news_textattack(s)
+            out.append(s)
+    if len(out) != len(sentences):
+        raise RuntimeError("Prediction count mismatch after text-classification run")
+    return out
+
+
+def load_extractive_qa_model(model_id: str) -> Tuple[Any, Any, Any]:
+    """
+    Load tokenizer + ``AutoModelForQuestionAnswering`` for extractive QA.
+    Transformers 5.x removed the ``question-answering`` pipeline task; callers
+    should use :func:`extractive_qa_answer` in a loop.
+    """
+    check_transformers_torch()
+    import torch
+    from transformers import AutoModelForQuestionAnswering, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForQuestionAnswering.from_pretrained(model_id)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+    return tok, model, device
+
+
+def extractive_qa_answer(
+    tokenizer: Any,
+    model: Any,
+    device: Any,
+    question: str,
+    context: str,
+    *,
+    max_length: int = 384,
+) -> str:
+    """Single extractive QA span (truncated context)."""
+    import torch
+
+    inputs = tokenizer(
+        question,
+        context,
+        return_tensors="pt",
+        truncation=True,
+        max_length=max_length,
+    )
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+    with torch.no_grad():
+        outputs = model(**inputs)
+    start = int(torch.argmax(outputs.start_logits, dim=-1).item())
+    end = int(torch.argmax(outputs.end_logits, dim=-1).item())
+    if end < start:
+        end = start
+    ids = inputs["input_ids"][0]
+    ans_ids = ids[start : end + 1]
+    return tokenizer.decode(ans_ids, skip_special_tokens=True)

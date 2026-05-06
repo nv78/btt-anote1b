@@ -36,6 +36,12 @@ def main() -> None:
         action="store_true",
         help="Allow fallback to 'question' without a 'sentence' key (not recommended for SST-2)",
     )
+    parser.add_argument(
+        "--pipeline-task",
+        choices=("sentiment-analysis", "text-classification"),
+        default="sentiment-analysis",
+        help="HF pipeline type (text-classification for AG News, 3-way sentiment, etc.)",
+    )
     args = parser.parse_args()
 
     os.chdir(ROOT)
@@ -46,6 +52,7 @@ def main() -> None:
     from hf_runner_inference import (
         ground_truth_to_id_sentences,
         run_sentiment_pipeline_batched,
+        run_text_classification_pipeline_batched,
         build_predictions_json,
         submission_model_name_from_id,
         check_transformers_torch,
@@ -97,11 +104,18 @@ def main() -> None:
         example_ids = [t[0] for t in id_sentences]
         sentences = [t[1] for t in id_sentences]
 
-        labels = run_sentiment_pipeline_batched(
-            args.model_id,
-            sentences,
-            batch_size=args.batch_size,
-        )
+        if args.pipeline_task == "sentiment-analysis":
+            labels = run_sentiment_pipeline_batched(
+                args.model_id,
+                sentences,
+                batch_size=args.batch_size,
+            )
+        else:
+            labels = run_text_classification_pipeline_batched(
+                args.model_id,
+                sentences,
+                batch_size=args.batch_size,
+            )
         predictions = build_predictions_json(example_ids, labels)
 
         pred_ids = {p["id"] for p in predictions}
@@ -121,7 +135,7 @@ def main() -> None:
         meta = {
             "model_id": args.model_id,
             "provider": "huggingface",
-            "task": "sentiment-analysis",
+            "task": args.pipeline_task,
             "dataset_id": args.dataset_id,
             "num_examples_evaluated": len(predictions),
             "batch_size": args.batch_size,
