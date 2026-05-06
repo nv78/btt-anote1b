@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import IconButton from "@mui/material/IconButton";
+import Skeleton from "@mui/material/Skeleton";
 import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
 import { useNavigate } from "react-router-dom";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
@@ -116,9 +118,17 @@ const Leaderboard = () => {
   const [viewMode, setViewMode] = useState('live'); // 'live' | 'curated'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [apiFailed, setApiFailed] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
 
   const liveDatasets = useMemo(() => groupLeaderboardEntries(liveEntries), [liveEntries]);
+
+  const refreshLeaderboard = () => {
+    setApiFailed(false);
+    setRefreshNonce((n) => n + 1);
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -126,23 +136,28 @@ const Leaderboard = () => {
       try {
         const res = await fetch(`${API_BASE}/public/datasets`);
         const data = await res.json();
+        if (!res.ok) throw new Error("Failed to load datasets");
         if (!ignore && data.success && Array.isArray(data.datasets)) {
           setDatasetOptions(
             data.datasets.map((d) => ({ name: d.name, label: `${d.name} (${d.task_type || "task"})` }))
           );
         }
       } catch {
-        if (!ignore) setDatasetOptions([]);
+        if (!ignore) {
+          setDatasetOptions([]);
+          setApiFailed(true);
+        }
       }
     })();
     return () => { ignore = true; };
-  }, [API_BASE]);
+  }, [API_BASE, refreshNonce]);
 
   useEffect(() => {
     let ignore = false;
     const run = async () => {
       setLoading(true);
       setError("");
+      setApiFailed(false);
       setNextCursor(null);
       try {
         const url = new URL(`${API_BASE}/public/get_leaderboard`);
@@ -157,14 +172,18 @@ const Leaderboard = () => {
           setNextCursor(data.next_cursor || null);
         }
       } catch (e) {
-        if (!ignore) setError(e.message || "Error loading leaderboard");
+        if (!ignore) {
+          setError(e.message || "Error loading leaderboard");
+          setApiFailed(true);
+          setLiveEntries([]);
+        }
       } finally {
         if (!ignore) setLoading(false);
       }
     };
     run();
     return () => { ignore = true; };
-  }, [API_BASE, liveDatasetFilter]);
+  }, [API_BASE, liveDatasetFilter, refreshNonce]);
 
   const loadMoreLive = async () => {
     if (!nextCursor || loadingMore) return;
@@ -183,6 +202,7 @@ const Leaderboard = () => {
       setNextCursor(data.next_cursor || null);
     } catch (e) {
       setError(e.message || "Error loading more");
+      setApiFailed(true);
     } finally {
       setLoadingMore(false);
     }
@@ -194,7 +214,7 @@ const Leaderboard = () => {
       try {
         const res = await fetch(`${API_BASE}/api/leaderboard/list`);
         const data = await res.json();
-        if (!res.ok || data.status !== 'success') return;
+        if (!res.ok || data.status !== 'success') throw new Error("Failed to load curated leaderboard");
         const groups = (data.datasets || []).map((d) => ({
           name: d.name,
           url: d.url,
@@ -208,11 +228,22 @@ const Leaderboard = () => {
           })),
         }));
         if (!ignore) setCuratedDatasets(groups);
-      } catch {}
+      } catch {
+        if (!ignore) {
+          setCuratedDatasets([]);
+          setApiFailed(true);
+        }
+      }
     };
     run();
     return () => { ignore = true; };
-  }, [API_BASE]);
+  }, [API_BASE, refreshNonce]);
+
+  useEffect(() => {
+    if (!loading) {
+      setIsDemoMode(liveDatasets.length === 0 && curatedDatasets.length === 0);
+    }
+  }, [loading, liveDatasets.length, curatedDatasets.length]);
 
   const handleClick = (index) => {
     setOpenIndex(openIndex === index ? null : index);
@@ -1224,9 +1255,26 @@ const Leaderboard = () => {
             <span className="w-1.5 h-1.5 rounded-full bg-[#28b2fb] animate-pulse" />
             Anote Evaluations
           </div> */}
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight bg-white bg-clip-text text-transparent leading-tight">
-            Model Leaderboard
-          </h1>
+          <div className="flex items-center justify-center gap-2">
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight bg-white bg-clip-text text-transparent leading-tight">
+              Model Leaderboard
+            </h1>
+            <IconButton
+              aria-label="Refresh leaderboard"
+              title="Refresh leaderboard"
+              onClick={refreshLeaderboard}
+              size="small"
+              sx={{
+                color: "#d1d5db",
+                border: "1px solid rgba(75,85,99,0.7)",
+                width: 34,
+                height: 34,
+                "&:hover": { color: "#defe47", borderColor: "rgba(222,254,71,0.5)", backgroundColor: "rgba(222,254,71,0.08)" },
+              }}
+            >
+              ⟳
+            </IconButton>
+          </div>
           <p className="mt-4 text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed">
             Compare models, submit results, and track model performance.
           </p>
@@ -1254,16 +1302,20 @@ const Leaderboard = () => {
         </p>
       </div>
 
-      {/* ── Loading / error ── */}
-      {loading && (
-        <div className="mt-16 text-gray-400 flex items-center gap-2.5 text-sm">
-          <svg className="animate-spin w-4 h-4 text-[#28b2fb]" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-          </svg>
-          Loading leaderboard…
+      {apiFailed && (
+        <div className="mt-8 w-full max-w-7xl rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100 flex items-center justify-between gap-3">
+          <span>Could not reach the leaderboard API. Showing demo data.</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-lg border border-yellow-400/40 px-2.5 py-1 text-xs font-semibold text-yellow-100 hover:bg-yellow-400/10"
+            onClick={() => setApiFailed(false)}
+          >
+            Dismiss
+          </button>
         </div>
       )}
+
+      {/* ── Loading / error ── */}
       {error && (
         <div className="mt-10 text-red-400 text-sm bg-red-900/20 border border-red-800/40 rounded-lg px-4 py-2.5">
           {error}
@@ -1272,7 +1324,17 @@ const Leaderboard = () => {
 
       {/* ── Dataset cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6 mt-10 w-full max-w-7xl">
-        {displayDatasets.map((dataset, index) => {
+        {loading
+          ? Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton
+                key={`leaderboard-skeleton-${index}`}
+                variant="rectangular"
+                height={200}
+                animation="pulse"
+                sx={{ bgcolor: "rgba(75,85,99,0.28)", borderRadius: "1rem" }}
+              />
+            ))
+          : displayDatasets.map((dataset, index) => {
           const dkey = dataset.name || `idx-${index}`;
           const showAdv = !!advancedMetrics[dkey];
           const showAllRanks = !!expandedRankDepth[dkey];
@@ -1293,9 +1355,16 @@ const Leaderboard = () => {
             {/* Card header */}
             <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/60">
               <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>
-                  {dataset.name}
-                </h2>
+                <div className="flex items-center min-w-0">
+                  <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>
+                    {dataset.name}
+                  </h2>
+                  {isDemoMode && (
+                    <span className="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded-full ml-2 shrink-0">
+                      Demo
+                    </span>
+                  )}
+                </div>
                 {(dataset.task_type || dataset.evaluation_metric) && (
                   <span className="mt-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-800/80 text-[11px] text-gray-400 font-medium border border-gray-700/50">
                     {[humanizeMetricKey(dataset.task_type), humanizeMetricKey(dataset.evaluation_metric)].filter(Boolean).join(" · ")}

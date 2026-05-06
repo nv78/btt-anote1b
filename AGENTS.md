@@ -23,7 +23,16 @@ The active development branch is **`jeremy`** on `https://github.com/anote-ai/Le
 ```
 Leaderboard/
 ├── backend/                    # Flask (Python) REST API
-│   ├── app.py                  # ALL routes (~2300 lines) — the single Flask application
+│   ├── app.py                  # Flask app factory, CORS, blueprint registration, main block
+│   ├── shared.py               # Compatibility exports for shared state/helpers used by routes/tests
+│   ├── blueprints/
+│   │   ├── __init__.py
+│   │   ├── leaderboard.py      # Registered API routes and route helpers
+│   │   ├── submissions.py      # Blueprint split placeholder for submission routes
+│   │   ├── eval.py             # Blueprint split placeholder for eval/import routes
+│   │   ├── auth.py             # Blueprint split placeholder for OAuth routes
+│   │   ├── admin.py            # Blueprint split placeholder for admin routes
+│   │   └── metrics.py          # Blueprint split placeholder for metrics routes
 │   ├── auth_helpers.py         # JWT decode helpers (HS256 + optional JWKS)
 │   ├── composite_score.py      # Aggregate 0-100 score from detailed_scores
 │   ├── csv_bench.py            # CSV benchmark: task inference, scoring
@@ -99,7 +108,7 @@ Leaderboard/
 | Frontend | React 18, Create React App, Tailwind CSS |
 | State | Redux Toolkit + Redux Persist (cross-component), Zustand (local) |
 | Auth | Google OAuth 2.0 → HS256 JWT minted by Flask; or Bearer JWT via JWKS |
-| Tests | pytest (`backend/tests/` is the primary suite; 22 tests, all must pass) |
+| Tests | pytest (`backend/tests/` is the primary suite; 29 tests, all must pass) |
 | CI | `.github/workflows/ci.yml` — pytest + Ruff + frontend build |
 
 ---
@@ -191,10 +200,13 @@ Provides static metadata for the 10 demo cards hardcoded in the frontend `Leader
 When the live API returns no rows, Details navigation still works because `dataset_details` falls back to this catalog.
 **If you add a new hardcoded demo dataset to `Leaderboard.js`, add a matching entry here.**
 
+### `blueprints/leaderboard.py`
+Registered Flask blueprint for the current API surface. `backend/app.py` creates the Flask app, configures CORS/OAuth, registers this blueprint, and re-exports shared globals for older tests/scripts.
+
 ### `TaskAdvancedMetricsPanel.js`
 Reusable React component:
 - Calls `GET /api/metrics/task/<taskType>`.
-- Renders a table: metric name | formula | range | one column per model with values from `detailed_scores`.
+- Renders grouped, collapsible metric categories with formula, range, and one score column per model.
 - Used in `Leaderboard.js` (advanced toggle per card) and `DatasetDetails.js` (full glossary).
 - Values are resolved via `lookupDetailedScore(detailedScores, catalogKey)` — tolerates case/`_` differences.
 
@@ -263,13 +275,11 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 - OAuth consent screen is in "Testing" mode — add test users or publish.
 
 #### UI polish
-- `TaskAdvancedMetricsPanel` is functional but **visually rough** — dense table, no grouping by metric category, no expand/collapse, not mobile-friendly. Redesign when ready.
 - Leaderboard card badge for task type / evaluation metric is tiny text — could be improved.
 - No empty state illustration when `liveDatasets` is empty.
 - `SubmitToLeaderboard.js` has many unused state variables (no-unused-vars linter warnings that were pre-existing).
 
 #### Backend
-- `app.py` is 2300+ lines — should be split into blueprints (`leaderboard`, `admin`, `eval`, `auth`, `metrics`).
 - No async background job queue for long submissions; `eval_jobs` API stub exists but jobs are currently synchronous.
 - SQLite schema migrations are manual; optional MySQL remains supported but no Alembic or similar exists.
 - No rate-limiting on read endpoints; only write endpoints are rate-limited.
@@ -288,7 +298,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 ## Conventions agents must follow
 
 ### Always
-1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 22 tests must pass.
+1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 29 tests must pass.
 2. **Run `npm run build` from `frontend/` before finishing.** Build must succeed (warnings OK, errors not).
 3. Keep the **SQLite default and in-memory `_STORE` fallback working** — never assume MySQL is available.
 4. Both `backend/tests/` and frontend build checks must stay green.
@@ -296,7 +306,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 ### Backend style
 - Wrap optional imports in `try/except ImportError` with graceful degradation.
 - All new functions need Python type annotations.
-- New routes follow the existing pattern: register at module level in `app.py`, use `@rate_limit`, `@require_api_key` decorators as appropriate.
+- New routes follow the existing pattern: register on the appropriate blueprint module and use `@rate_limit`, `@require_api_key` decorators as appropriate.
 - New metrics go in `METRICS_CATALOG` in `metrics_info_full.py` with `name`, `formula`, `description`, `range`, `when_to_use`.
 - New task types: add entry in `get_metrics_for_task()` AND alias in `normalize_task_type_for_metrics()` if needed.
 
@@ -335,7 +345,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 2. Add a matching entry in `backend/ui_fallback_dataset_catalog.py` (key = lowercased name).
 
 ### Add a new API endpoint
-1. Add the Flask route in `backend/app.py`.
+1. Add the Flask route in the appropriate `backend/blueprints/` module.
 2. Apply `@rate_limit` and `@require_api_key` / `@require_admin` as appropriate.
 3. Add a test in `backend/tests/`.
 4. Update the route table in this file (`AGENTS.md`) and `CLAUDE.md`.
@@ -353,8 +363,6 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 |-------|----------|----------|
 | Google OAuth broken — no client secret | `backend/.env` | High |
 | JWT secret is placeholder | `backend/.env` | High |
-| `TaskAdvancedMetricsPanel` is too dense / ugly | `frontend/…/TaskAdvancedMetricsPanel.js` | Medium |
-| `app.py` is a monolith (~2300 lines) | `backend/app.py` | Medium |
 | Frontend `.env.development` points to `:5000` not `:5001` | `frontend/.env.development` | Low |
 | No frontend tests | — | Low |
 | `SubmitToLeaderboard.js` has ~20 unused state variables | `frontend/…/SubmitToLeaderboard.js` | Low |
