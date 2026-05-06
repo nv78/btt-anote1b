@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   addDatasetPath,
+  createLeaderboardPath,
   csvBenchmarksPath,
   evaluationsPath,
   loginPath,
@@ -27,6 +28,7 @@ export default function HeaderBar() {
     { label: 'My submissions', path: mySubmissionsPath },
     { label: 'Add Dataset', path: addDatasetPath },
     { label: 'Benchmarks', path: csvBenchmarksPath },
+    { label: '＋ New Leaderboard', path: createLeaderboardPath, outlined: true },
   ];
 
   const signedInWithJwt = authRev >= 0 && !!getLeaderboardJwt();
@@ -76,9 +78,14 @@ export default function HeaderBar() {
                 onClick={() => navigate(item.path)}
                 className={[
                   "px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150",
+                  item.outlined ? "ml-1 border border-[#28b2fb]/30" : "",
                   isActive(item.path)
-                    ? "text-[#defe47] font-semibold"
-                    : "text-gray-400 hover:text-gray-100"
+                    ? item.outlined
+                      ? "text-[#defe47] border-[#defe47]/50 bg-[#defe47]/5 font-semibold"
+                      : "text-[#defe47] font-semibold"
+                    : item.outlined
+                      ? "text-[#28b2fb] hover:text-[#defe47] hover:border-[#defe47]/40 hover:bg-[#defe47]/5"
+                      : "text-gray-400 hover:text-gray-100"
                 ].join(' ')}
               >
                 {item.label}
@@ -142,9 +149,14 @@ export default function HeaderBar() {
                 onClick={() => { navigate(item.path); setMobileOpen(false); }}
                 className={[
                   "px-3 py-2 rounded-lg text-sm font-medium text-left transition-all",
+                  item.outlined ? "border border-[#28b2fb]/30" : "",
                   isActive(item.path)
-                    ? "bg-[#defe47] text-black font-semibold"
-                    : "text-gray-400 hover:text-gray-100 hover:bg-white/[0.06]"
+                    ? item.outlined
+                      ? "bg-[#defe47]/10 text-[#defe47] border-[#defe47]/50 font-semibold"
+                      : "bg-[#defe47] text-black font-semibold"
+                    : item.outlined
+                      ? "text-[#28b2fb] hover:text-[#defe47] hover:border-[#defe47]/40 hover:bg-[#defe47]/5"
+                      : "text-gray-400 hover:text-gray-100 hover:bg-white/[0.06]"
                 ].join(' ')}
               >
                 {item.label}

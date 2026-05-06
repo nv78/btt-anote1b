@@ -50,7 +50,7 @@ Last updated: May 2026. Check off items as they are completed.
 - [ ] **Demo chip renders correctly** — when API is down or empty, each leaderboard card should show a grey "Demo" badge. Start the frontend with the backend stopped and verify the banner + chips appear. File: `Leaderboard.js`.
 - [ ] **`TaskAdvancedMetricsPanel` — verify grouped layout** — open a dataset card, click "Advanced metrics", confirm categories (Core / Precision-Recall / Semantic overlap / Ranking / Translation) are grouped with collapse/expand. Metrics with no model scores should show "—" not blank.
 - [ ] **`DatasetDetails.js` — verify Details page works for all 10 demo datasets** — click "Details" on each leaderboard card. Should not 404. Backed by `ui_fallback_dataset_catalog.py`.
-- [ ] **`/create-leaderboard` link not exposed in nav** — the page exists at the route but there's no link to it from the header or leaderboard. Add a "➕ Create Leaderboard" button somewhere accessible (e.g. next to the leaderboard title or in the nav). File: `HeaderBar.js` or `Leaderboard.js`.
+- [x] **`/create-leaderboard` link not exposed in nav** — added a small outlined "＋ New Leaderboard" nav link in `HeaderBar.js`.
 - [ ] **Remove unused state variables in `SubmitToLeaderboard.js`** — there are ~20 `useState` declarations for features that were never wired up (pre-existing lint warnings). Clean up to reduce confusion. File: `frontend/src/landing_page/landing_page_components/SubmitToLeaderboard.js`.
 
 ---
