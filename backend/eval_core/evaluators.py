@@ -7,8 +7,6 @@ Designed to prevent metric gaming by supporting diverse evaluation strategies.
 from typing import List, Dict, Any, Tuple
 from collections import Counter
 import re
-import numpy as np
-from sklearn.metrics import matthews_corrcoef
 
 
 class BaseEvaluator:
@@ -154,7 +152,12 @@ class TextClassificationEvaluator(BaseEvaluator):
         if mcc_y_true:
             uniq = set(mcc_y_true) | set(mcc_y_pred)
             if len(uniq) >= 2:
-                mcc = float(matthews_corrcoef(mcc_y_true, mcc_y_pred))
+                try:
+                    from sklearn.metrics import matthews_corrcoef
+
+                    mcc = float(matthews_corrcoef(mcc_y_true, mcc_y_pred))
+                except Exception:
+                    mcc = None
             else:
                 mcc = 0.0
         
@@ -578,7 +581,7 @@ class TranslationEvaluator(BaseEvaluator):
                 sr, sh = set(ref), set(hyp)
                 bleu_scores.append(len(sr & sh) / len(sr | sh) if (sr | sh) else 0.0)
 
-        bleu = float(np.mean(bleu_scores)) if bleu_scores else 0.0
+        bleu = sum(bleu_scores) / len(bleu_scores) if bleu_scores else 0.0
         bleu_r = round(bleu, 4)
         out: Dict[str, float] = {"bleu": bleu_r}
         hyp_list = [str(pred_map[gt["id"]]) for gt in ground_truth if gt["id"] in pred_map]
@@ -620,4 +623,3 @@ def get_evaluator(task_type: str) -> BaseEvaluator:
         raise ValueError(f"Unknown task type: {task_type}")
     
     return evaluator
-

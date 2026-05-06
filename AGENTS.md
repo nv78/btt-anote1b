@@ -23,16 +23,16 @@ The active development branch is **`jeremy`** on `https://github.com/anote-ai/Le
 ```
 Leaderboard/
 ├── backend/                    # Flask (Python) REST API
-│   ├── app.py                  # Flask app factory, CORS, blueprint registration, main block
-│   ├── shared.py               # Compatibility exports for shared state/helpers used by routes/tests
+│   ├── app.py                  # Flask app factory, CORS, core routes/OpenAPI, blueprint registration (~248 lines)
+│   ├── shared.py               # Shared state/helpers imported by blueprints (~428 lines)
 │   ├── blueprints/
 │   │   ├── __init__.py
-│   │   ├── leaderboard.py      # Registered API routes and route helpers
-│   │   ├── submissions.py      # Blueprint split placeholder for submission routes
-│   │   ├── eval.py             # Blueprint split placeholder for eval/import routes
-│   │   ├── auth.py             # Blueprint split placeholder for OAuth routes
-│   │   ├── admin.py            # Blueprint split placeholder for admin routes
-│   │   └── metrics.py          # Blueprint split placeholder for metrics routes
+│   │   ├── leaderboard.py      # Dataset, leaderboard, export, curated seed/list routes (~1060 lines)
+│   │   ├── submissions.py      # Submit, my submissions, submission detail, eval jobs routes (~622 lines)
+│   │   ├── eval.py             # HF import/model runner, CSV benchmark routes (~508 lines)
+│   │   ├── auth.py             # Google OAuth start/callback routes (~62 lines)
+│   │   ├── admin.py            # Admin submissions moderation route (~219 lines)
+│   │   └── metrics.py          # Metrics catalog routes (~23 lines)
 │   ├── auth_helpers.py         # JWT decode helpers (HS256 + optional JWKS)
 │   ├── composite_score.py      # Aggregate 0-100 score from detailed_scores
 │   ├── csv_bench.py            # CSV benchmark: task inference, scoring
@@ -200,8 +200,14 @@ Provides static metadata for the 10 demo cards hardcoded in the frontend `Leader
 When the live API returns no rows, Details navigation still works because `dataset_details` falls back to this catalog.
 **If you add a new hardcoded demo dataset to `Leaderboard.js`, add a matching entry here.**
 
-### `blueprints/leaderboard.py`
-Registered Flask blueprint for the current API surface. `backend/app.py` creates the Flask app, configures CORS/OAuth, registers this blueprint, and re-exports shared globals for older tests/scripts.
+### Backend blueprints
+`backend/app.py` creates the Flask app, configures CORS/OAuth, registers all blueprints, and re-exports shared globals for older tests/scripts. Route ownership is split across:
+- `blueprints/leaderboard.py` — datasets, dataset details/questions, submission format, leaderboard, export, curated add/list/seed.
+- `blueprints/submissions.py` — submit model, my submissions, submission detail, eval jobs.
+- `blueprints/eval.py` — HF import/model runner, CSV benchmark listing/runs, source sentences, ingestion alias.
+- `blueprints/auth.py` — Google OAuth start/callback.
+- `blueprints/admin.py` — admin submission listing.
+- `blueprints/metrics.py` — metric catalog and per-task metric glossary.
 
 ### `TaskAdvancedMetricsPanel.js`
 Reusable React component:
@@ -366,7 +372,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 | Frontend `.env.development` points to `:5000` not `:5001` | `frontend/.env.development` | Low |
 | No frontend tests | — | Low |
 | `SubmitToLeaderboard.js` has ~20 unused state variables | `frontend/…/SubmitToLeaderboard.js` | Low |
-| Async eval job queue is stub only | `backend/app.py` + `eval_core/` | Low |
+| Async eval job queue is stub only | `backend/blueprints/submissions.py` + `backend/blueprints/eval.py` | Low |
 
 ---
 

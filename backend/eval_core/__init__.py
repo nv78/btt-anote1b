@@ -1,3 +1,5 @@
-"""Personal-aligned evaluators for the Flask leaderboard (branch: jeremy)."""
+"""Evaluation package.
 
-from eval_core.evaluators import get_evaluator  # noqa: F401
+Import evaluators directly from ``eval_core.evaluators`` so package import stays
+cheap and does not load optional numeric dependencies during test collection.
+"""
