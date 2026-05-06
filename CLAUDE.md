@@ -1,5 +1,8 @@
 # CLAUDE.md — Anote Model Leaderboard
 
+> **Agents: read `AGENTS.md` first.** It is the authoritative, up-to-date onboarding document.
+> This file is retained for backward compatibility but may be outdated in places.
+
 This file provides AI assistants with the context needed to work effectively in this repository.
 
 ---
