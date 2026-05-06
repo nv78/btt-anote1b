@@ -192,6 +192,7 @@ When running locally, override with `REACT_APP_API_ENDPOINT=http://localhost:500
 | POST | `/public/run_csv_benchmarks` | Benchmark models against CSV datasets |
 | POST | `/api/leaderboard/add_dataset` | Add a new benchmark dataset |
 | POST | `/api/leaderboard/add_model` | Add a model result to a dataset |
+| POST | `/api/leaderboard/seed` | Admin seed for the built-in benchmark datasets |
 | GET | `/api/leaderboard/list` | List all datasets |
 
 ---

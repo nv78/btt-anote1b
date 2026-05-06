@@ -10,3 +10,7 @@ __pycache__/
 venv/
 .env
 .env.local
+
+# Local SQLite database
+leaderboard.db
+backend/leaderboard.db

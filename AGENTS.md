@@ -155,6 +155,7 @@ GET  /api/metrics                       Full metric catalog
 GET  /api/metrics/task/<task_type>      Per-task metric glossary + formulas
 POST /api/leaderboard/add_dataset       Add curated dataset (API key required)
 POST /api/leaderboard/add_model         Add model result to curated dataset
+POST /api/leaderboard/seed              Admin: seed the 10 built-in benchmark datasets
 GET  /api/leaderboard/list              List curated datasets
 ```
 

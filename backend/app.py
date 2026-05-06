@@ -660,6 +660,110 @@ def _mem_leaderboard_row_after_anchor(item, dataset_filter, single_ds, an_d, an_
     return (name > an_d) or (name == an_d and sc < float(an_s)) or (name == an_d and sc == float(an_s) and sid < int(an_i))
 
 
+def _leaderboard_row_after_anchor(row: dict[str, Any], dataset_filter: str | None, an_d: str, an_s: float, an_i: int) -> bool:
+    name = row["dataset_name"]
+    score = float(row["score"])
+    submission_id = int(row.get("submission_id") or 0)
+    if dataset_filter:
+        return (score < float(an_s)) or (score == float(an_s) and submission_id < int(an_i))
+    return (
+        (name > an_d)
+        or (name == an_d and score < float(an_s))
+        or (name == an_d and score == float(an_s) and submission_id < int(an_i))
+    )
+
+
+def _leaderboard_data_rows(dataset_filter: str | None, represented: set[tuple[str, str]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    synthetic_id = -1
+    for dataset in LEADERBOARD_DATA:
+        dataset_name = dataset.get("name")
+        if not dataset_name or (dataset_filter and dataset_name != dataset_filter):
+            continue
+        for model in dataset.get("models") or []:
+            model_name = model.get("model") or model.get("model_name")
+            if not model_name:
+                continue
+            key = (str(dataset_name), str(model_name))
+            if key in represented:
+                continue
+            detailed_scores = model.get("detailed_scores")
+            metric = dataset.get("evaluation_metric") or model.get("primary_metric") or "score"
+            if not isinstance(detailed_scores, dict):
+                detailed_scores = {metric: model.get("score")}
+            rows.append({
+                "rank": 0,
+                "submission_id": synthetic_id,
+                "model_name": str(model_name),
+                "dataset_name": str(dataset_name),
+                "task_type": dataset.get("task_type"),
+                "evaluation_metric": metric,
+                "score": float(model.get("score") or 0),
+                "submitted_by": model.get("submitted_by") or "seed_real_benchmarks@anote.ai",
+                "metadata": {
+                    "source": "LEADERBOARD_DATA",
+                    "rank": model.get("rank"),
+                    "updated": model.get("updated"),
+                    "ci": model.get("ci"),
+                },
+                "detailed_scores": detailed_scores,
+                "primary_metric": metric,
+                "submitted_at": model.get("updated"),
+            })
+            synthetic_id -= 1
+    return rows
+
+
+def _finalize_leaderboard_response(
+    rows: list[dict[str, Any]],
+    dataset_filter: str | None,
+    page: int,
+    page_size: int,
+    offset: int,
+    use_cursor: bool,
+    rank_start: int,
+    an_d: str,
+    an_s: float,
+    an_i: int,
+) -> dict[str, Any]:
+    rows.sort(key=lambda r: (r["dataset_name"], -float(r["score"]), -int(r.get("submission_id") or 0)))
+    total = len(rows)
+    if use_cursor:
+        page_rows = []
+        for row in rows:
+            if not _leaderboard_row_after_anchor(row, dataset_filter, an_d, an_s, an_i):
+                continue
+            page_rows.append(row)
+            if len(page_rows) >= page_size:
+                break
+    else:
+        page_rows = rows[offset:offset + page_size]
+
+    r0 = rank_start if use_cursor else offset + 1
+    for j, row in enumerate(page_rows):
+        row["rank"] = r0 + j
+    leaderboard = enrich_leaderboard_list(page_rows)
+    out = {
+        "success": True,
+        "leaderboard": leaderboard,
+        "entries": leaderboard,
+        "page": page if not use_cursor else None,
+        "page_size": page_size,
+        "total": total,
+    }
+    has_more = len(page_rows) == page_size and (use_cursor or offset + len(page_rows) < total)
+    if has_more and page_rows:
+        last = page_rows[-1]
+        out["next_cursor"] = leaderboard_cursor_encode(
+            dataset_name=last["dataset_name"],
+            score=float(last["score"]),
+            submission_id=int(last.get("submission_id") or 0),
+            next_rank_start=r0 + len(page_rows),
+            single_dataset=bool(dataset_filter),
+        )
+    return out
+
+
 @app.get('/public/get_leaderboard')
 def get_leaderboard():
     """Get leaderboard showing model submissions and scores.
@@ -676,6 +780,9 @@ def get_leaderboard():
     use_cursor = bool(cursor_token)
     rank_start = 1
     key_single = bool(dataset_filter)
+    an_d = ""
+    an_s = 0.0
+    an_i = 0
 
     if use_cursor:
         cd = decode_cursor(cursor_token)
@@ -723,17 +830,6 @@ def get_leaderboard():
                 where += " AND bd.name = %s"
                 params.append(dataset_filter)
 
-            count_query = (
-                "SELECT COUNT(*) AS total "
-                "FROM model_submissions ms "
-                "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
-                "JOIN evaluation_results er ON er.model_submission_id = ms.id "
-                f"{where}"
-            )
-            cursor.execute(count_query, tuple(params))
-            total_row = cursor.fetchone() or {}
-            total = int(total_row.get("total", 0))
-
             base_select = (
                 "SELECT ms.id AS submission_id, ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
                 "er.score, er.evaluation_details, ms.created AS submitted_at, "
@@ -743,46 +839,28 @@ def get_leaderboard():
                 "JOIN evaluation_results er ON er.model_submission_id = ms.id "
             )
             order = " ORDER BY bd.name ASC, er.score DESC, ms.id DESC "
-
-            if use_cursor:
-                wk = list(params)
-                if dataset_filter:
-                    where_k = where + " AND ((er.score < %s) OR (er.score = %s AND ms.id < %s))"
-                    wk.extend([an_s, an_s, an_i])
-                else:
-                    where_k = where + (
-                        " AND ((bd.name > %s) OR (bd.name = %s AND er.score < %s) "
-                        "OR (bd.name = %s AND er.score = %s AND ms.id < %s))"
-                    )
-                    wk.extend([an_d, an_d, an_s, an_d, an_s, an_i])
-                query = base_select + where_k + order + "LIMIT %s"
-                cursor.execute(query, tuple(wk + [page_size]))
-            else:
-                query = base_select + where + order + "LIMIT %s OFFSET %s"
-                cursor.execute(query, tuple(params + [page_size, offset]))
-
+            query = base_select + where + order
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
-            r0 = rank_start if use_cursor else offset + 1
-            leaderboard = enrich_leaderboard_list(_rows_to_leaderboard(rows, r0))
-            out = {
-                "success": True,
-                "leaderboard": leaderboard,
-                "page": page if not use_cursor else None,
-                "page_size": page_size,
-                "total": total,
+            db_leaderboard = _rows_to_leaderboard(rows, 0)
+            represented = {
+                (row["dataset_name"], row["model_name"])
+                for row in db_leaderboard
+                if row.get("dataset_name") and row.get("model_name")
             }
-            has_more = len(rows) == page_size and (use_cursor or offset + len(rows) < total)
-            if has_more:
-                last = rows[-1]
-                next_r = r0 + len(rows)
-                out["next_cursor"] = leaderboard_cursor_encode(
-                    dataset_name=last["dataset_name"],
-                    score=float(last["score"]),
-                    submission_id=int(last["submission_id"]),
-                    next_rank_start=next_r,
-                    single_dataset=bool(dataset_filter),
-                )
-            return jsonify(out)
+            all_rows = db_leaderboard + _leaderboard_data_rows(dataset_filter, represented)
+            return jsonify(_finalize_leaderboard_response(
+                all_rows,
+                dataset_filter,
+                page,
+                page_size,
+                offset,
+                use_cursor,
+                rank_start,
+                an_d,
+                an_s,
+                an_i,
+            ))
         except Exception as e:
             logger.exception("leaderboard_db_read_failed", extra={"error": str(e)})
         finally:
@@ -801,22 +879,9 @@ def get_leaderboard():
         if dataset_filter and sub["benchmark_dataset_name"] != dataset_filter:
             continue
         mem_all.append((ev, sub))
-    mem_all.sort(key=lambda x: (x[1]["benchmark_dataset_name"], -float(x[0]["score"]), -int(x[1]["id"])))
-    total = len(mem_all)
-
-    if use_cursor:
-        mem = []
-        for item in mem_all:
-            if not _mem_leaderboard_row_after_anchor(item, dataset_filter, key_single, an_d, an_s, an_i):
-                continue
-            mem.append(item)
-            if len(mem) >= page_size:
-                break
-    else:
-        mem = mem_all[offset : offset + page_size]
-
-    leaderboard = []
-    for j, (ev, sub) in enumerate(mem):
+    all_rows = []
+    represented = set()
+    for ev, sub in mem_all:
         ev_details = ev.get("evaluation_details") or {}
         if not isinstance(ev_details, dict):
             ev_details = {}
@@ -824,8 +889,8 @@ def get_leaderboard():
             (d for d in _STORE["datasets"] if d.get("name") == sub["benchmark_dataset_name"]),
             None,
         )
-        leaderboard.append({
-            "rank": rank_start + j if use_cursor else offset + j + 1,
+        all_rows.append({
+            "rank": 0,
             "submission_id": sub["id"],
             "model_name": sub["model_name"],
             "dataset_name": sub["benchmark_dataset_name"],
@@ -838,26 +903,20 @@ def get_leaderboard():
             "primary_metric": ev_details.get("metric"),
             "submitted_at": sub["created"].isoformat(),
         })
-    leaderboard = enrich_leaderboard_list(leaderboard)
-    out = {
-        "success": True,
-        "leaderboard": leaderboard,
-        "page": page if not use_cursor else None,
-        "page_size": page_size,
-        "total": total,
-    }
-    mem_has_more = len(mem) == page_size and (use_cursor or offset + page_size < total)
-    if mem_has_more:
-        last_ev, last_sub = mem[-1]
-        next_r = rank_start + len(mem) if use_cursor else offset + len(mem) + 1
-        out["next_cursor"] = leaderboard_cursor_encode(
-            dataset_name=last_sub["benchmark_dataset_name"],
-            score=float(last_ev["score"]),
-            submission_id=int(last_sub["id"]),
-            next_rank_start=next_r,
-            single_dataset=bool(dataset_filter),
-        )
-    return jsonify(out)
+        represented.add((sub["benchmark_dataset_name"], sub["model_name"]))
+    all_rows.extend(_leaderboard_data_rows(dataset_filter, represented))
+    return jsonify(_finalize_leaderboard_response(
+        all_rows,
+        dataset_filter,
+        page,
+        page_size,
+        offset,
+        use_cursor,
+        rank_start,
+        an_d,
+        an_s,
+        an_i,
+    ))
 
 
 @app.post('/public/submit_model')
@@ -2196,6 +2255,7 @@ def openapi_spec():
                     ],
                 }
             },
+            "/api/leaderboard/seed": {"post": {"summary": "Admin: seed the 10 built-in benchmark datasets", "security": [{"AdminKeyAuth": []}]}},
             "/api/metrics": {"get": {"summary": "List metric metadata"}},
             "/api/metrics/task/{task_type}": {"get": {"summary": "List metrics for a task type"}},
         },
@@ -2825,6 +2885,55 @@ def add_model():
                         pass
             return jsonify({"status": "success", "message": "Model added to dataset on leaderboard."})
     return jsonify({"status": "error", "message": "Dataset not found."}), 404
+
+
+def _unwrapped_route(fn):
+    while hasattr(fn, "__wrapped__"):
+        fn = fn.__wrapped__
+    return fn
+
+
+@app.post('/api/leaderboard/seed')
+@require_admin
+def seed_leaderboard_data() -> Any:
+    """Seed the 10 benchmark datasets used by the frontend fallback cards."""
+    try:
+        from scripts.seed_real_benchmarks import DATASETS, detailed_scores  # type: ignore
+    except ImportError:
+        from backend.scripts.seed_real_benchmarks import DATASETS, detailed_scores  # type: ignore
+
+    dataset_fn = _unwrapped_route(add_dataset)
+    model_fn = _unwrapped_route(add_model)
+    models_added = 0
+    for dataset in DATASETS:
+        with app.test_request_context(
+            "/api/leaderboard/add_dataset",
+            method="POST",
+            json={
+                "name": dataset["name"],
+                "task_type": dataset["task_type"],
+                "evaluation_metric": dataset["evaluation_metric"],
+                "url": dataset["url"],
+                "description": f"Seeded benchmark card for {dataset['name']}.",
+            },
+        ):
+            dataset_fn()
+        for model in dataset["models"]:
+            payload = {
+                **model,
+                "dataset_name": dataset["name"],
+                "detailed_scores": detailed_scores(
+                    dataset["task_type"],
+                    dataset["evaluation_metric"],
+                    float(model["score"]),
+                ),
+            }
+            with app.test_request_context("/api/leaderboard/add_model", method="POST", json=payload):
+                resp = model_fn()
+            status_code = getattr(resp, "status_code", 200)
+            if status_code < 400:
+                models_added += 1
+    return jsonify({"seeded": len(DATASETS), "models_added": models_added})
 
 
 @app.get('/api/leaderboard/list')

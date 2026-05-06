@@ -13,6 +13,7 @@ def reset_store() -> None:
     app_module._STORE["evaluations"].clear()
     app_module._STORE["datasets"].clear()
     app_module._STORE.setdefault("submission_counts", {}).clear()
+    app_module.LEADERBOARD_DATA.clear()
 
 
 def test_dataset_questions_never_exposes_labels(monkeypatch):
@@ -155,4 +156,69 @@ def test_run_hf_model_route_with_mocked_predictions(monkeypatch, tmp_path):
         data = r.get_json()
         assert data["success"] is True
         assert data["score"] == 1.0
-        assert data["submission_id"] >= 1
+    assert data["submission_id"] >= 1
+
+
+def test_leaderboard_includes_leaderboard_data_entries_alias(monkeypatch):
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setenv("LEADERBOARD_API_KEYS", "k")
+    monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
+    reset_store()
+
+    with app.test_client() as c:
+        r = c.post(
+            "/api/leaderboard/add_dataset",
+            headers={"X-API-Key": "k"},
+            json={
+                "name": "curated-only",
+                "task_type": "text_classification",
+                "evaluation_metric": "accuracy",
+            },
+        )
+        assert r.status_code == 200
+        r = c.post(
+            "/api/leaderboard/add_model",
+            headers={"X-API-Key": "k"},
+            json={
+                "dataset_name": "curated-only",
+                "rank": 1,
+                "model": "curated-model",
+                "score": 0.91,
+                "updated": "May 2026",
+                "detailed_scores": {"accuracy": 0.91, "f1": 0.9},
+            },
+        )
+        assert r.status_code == 200
+
+        app_module._STORE["submissions"].clear()
+        app_module._STORE["evaluations"].clear()
+
+        r = c.get("/public/get_leaderboard")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert len(data["entries"]) >= 1
+        row = data["entries"][0]
+        assert row["dataset_name"] == "curated-only"
+        assert row["model_name"] == "curated-model"
+        assert row["detailed_scores"]["accuracy"] == 0.91
+
+
+def test_admin_seed_route_populates_leaderboard(monkeypatch):
+    from scripts.seed_real_benchmarks import DATASETS
+
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setenv("LEADERBOARD_ADMIN_API_KEYS", "admin")
+    monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
+    reset_store()
+
+    with app.test_client() as c:
+        r = c.post("/api/leaderboard/seed", headers={"X-Admin-Key": "admin"})
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["seeded"] == 10
+        assert data["models_added"] == sum(len(dataset["models"]) for dataset in DATASETS)
+
+        r = c.get("/public/get_leaderboard?page_size=100")
+        assert r.status_code == 200
+        rows = r.get_json()["entries"]
+        assert len(rows) >= data["models_added"]
