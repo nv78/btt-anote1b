@@ -134,6 +134,7 @@ GET  /openapi.json                      OpenAPI spec
 GET  /public/datasets                   List benchmark datasets
 GET  /public/dataset_details            Dataset detail + metric docs (name= query param)
 GET  /public/get_source_sentences       Translation sentences for evaluation
+GET  /public/dataset_questions          Dataset inputs/questions without labels (dataset= query param)
 POST /public/submit_model               Submit model predictions → evaluates → ranks
 GET  /public/get_leaderboard            Ranked results (keyset pagination + dataset filter)
 GET  /public/my_submissions             Caller's past submissions (JWT or submitter_id)

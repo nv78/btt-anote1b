@@ -177,6 +177,7 @@ When running locally, override with `REACT_APP_API_ENDPOINT=http://localhost:500
 | GET | `/health` | Health check |
 | GET | `/public/datasets` | List benchmark datasets |
 | GET | `/public/get_source_sentences` | Sentences to translate (for evaluation) |
+| GET | `/public/dataset_questions` | Dataset inputs/questions without labels |
 | POST | `/public/submit_model` | Submit model predictions for scoring |
 | GET | `/public/get_leaderboard` | Ranked model results |
 | GET | `/public/export/leaderboard` | Export leaderboard rows |

@@ -69,6 +69,8 @@ const SubmitToLeaderboard = ({
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("leaderboard_api_key") || "");
   const [submitterId, setSubmitterId] = useState(() => localStorage.getItem("leaderboard_submitter_id") || "");
   const [submissionFormat, setSubmissionFormat] = useState(null);
+  const [submissionFormatOpen, setSubmissionFormatOpen] = useState(false);
+  const [copiedFormat, setCopiedFormat] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("leaderboard_api_key", apiKey);
@@ -104,6 +106,26 @@ const SubmitToLeaderboard = ({
   useEffect(() => {
     if (datasetKey) loadSubmissionFormat(datasetKey);
   }, [datasetKey]);
+
+  const fieldExplanations = [
+    ["benchmarkDatasetName", "The exact dataset name selected above."],
+    ["modelName", "A readable model or run identifier for the leaderboard row."],
+    ["submittedBy", "Optional contact or owner label shown with your submission."],
+    ["sentence_ids", "Dataset item ids being answered; length must match modelResults."],
+    ["modelResults", "Your model outputs, in the same order as sentence_ids."],
+    ["metadata", "Optional JSON object for version, prompt, or run notes."],
+  ];
+
+  const copySubmissionFormat = async () => {
+    if (!submissionFormat?.submit_model_body) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(submissionFormat.submit_model_body, null, 2));
+      setCopiedFormat(true);
+      setTimeout(() => setCopiedFormat(false), 1500);
+    } catch {
+      setCopiedFormat(false);
+    }
+  };
 
   // Load available datasets from backend
   useEffect(() => {
@@ -809,13 +831,6 @@ const SubmitToLeaderboard = ({
               />
             </div>
           </div>
-          {submissionFormat && (
-            <div className="mb-3 text-xs text-gray-500 font-mono max-h-24 overflow-auto border border-gray-800 rounded p-2">
-              <div className="text-gray-400 mb-1">API template ({submissionFormat.task_type_normalized})</div>
-              <pre className="whitespace-pre-wrap break-all">{JSON.stringify(submissionFormat.submit_model_body, null, 0)}</pre>
-            </div>
-          )}
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
             <div className="md:col-span-2">
               <label className="block text-sm text-gray-300 mb-1">Benchmark</label>
@@ -847,6 +862,46 @@ const SubmitToLeaderboard = ({
               />
             </div>
           </div>
+          {submissionFormat && (
+            <div className="mb-4 rounded-lg border border-gray-800 bg-gray-950/40 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setSubmissionFormatOpen((v) => !v)}
+                className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-sm text-gray-200 hover:bg-white/[0.03]"
+              >
+                <span>
+                  Expected submission format
+                  <span className="ml-2 text-xs text-gray-500">
+                    {submissionFormat.task_type_normalized} / {submissionFormat.evaluation_metric_normalized}
+                  </span>
+                </span>
+                <span className="text-[#defe47]">{submissionFormatOpen ? "Hide" : "Show"}</span>
+              </button>
+              {submissionFormatOpen && (
+                <div className="border-t border-gray-800 p-3 space-y-3">
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={copySubmissionFormat}
+                      className="px-3 py-1.5 rounded-md border border-[#defe47]/50 text-[#defe47] text-xs font-semibold hover:bg-[#defe47]/10"
+                    >
+                      {copiedFormat ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <pre className="text-xs text-gray-300 bg-[#111827] border border-gray-800 rounded-md p-3 overflow-auto max-h-72">
+                    {JSON.stringify(submissionFormat.submit_model_body, null, 2)}
+                  </pre>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {fieldExplanations.map(([field, explanation]) => (
+                      <div key={field} className="text-xs text-gray-400">
+                        <span className="font-mono text-gray-200">{field}</span>: {explanation}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="mb-4">
             <button type="button" onClick={()=>setProposeOpen(v=>!v)} className="text-xs text-yellow-400 underline">
               {proposeOpen ? 'Hide dataset proposal' : "Can't find your dataset? Propose one"}

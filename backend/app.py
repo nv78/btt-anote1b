@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import StringIO
 from time import time
+from typing import Any
 from urllib.parse import quote
 
 from flask import Flask, Response, request, jsonify, redirect
@@ -196,6 +197,28 @@ def validate_metadata(value):
     return value
 
 
+def daily_submission_limit() -> int:
+    try:
+        return max(0, int(os.getenv("DAILY_SUBMISSION_LIMIT", "5")))
+    except ValueError:
+        return 5
+
+
+def _consume_submission_quota(submitter_id: str) -> tuple[bool, int, str]:
+    now = utc_now()
+    day = now.date().isoformat()
+    limit = daily_submission_limit()
+    key = f"{submitter_id}:{day}"
+    counts = _STORE.setdefault("submission_counts", {})
+    used = int(counts.get(key, 0))
+    resets_at = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) + timedelta(days=1)
+    if limit > 0 and used >= limit:
+        return False, 0, resets_at.isoformat()
+    counts[key] = used + 1
+    remaining = max(0, limit - int(counts[key]))
+    return True, remaining, resets_at.isoformat()
+
+
 def require_api_key(fn):
     """Writes: ``X-API-Key`` in ``LEADERBOARD_API_KEYS`` or Bearer JWT with ``sub`` (HS256 or Anote JWKS)."""
 
@@ -346,6 +369,7 @@ _STORE = {
     "submissions": [],  # {id, benchmark_dataset_name, model_name, submitter_id?, results, created}
     "evaluations": [],  # {submission_id, score, metric, evaluation_details?, created}
     "datasets": [],  # {name, task_type, evaluation_metric, reference_data}
+    "submission_counts": {},  # {"submitter_id:YYYY-MM-DD": count}
 }
 
 # In-process async eval jobs (optional ``async: true`` on submit); not durable across restarts.
@@ -472,6 +496,93 @@ def submission_format():
         dataset.get("reference_data"),
     )
     return jsonify(payload)
+
+
+def _questions_from_reference_data(reference_data: object) -> list[dict[str, Any]]:
+    if isinstance(reference_data, str):
+        try:
+            reference_data = json.loads(reference_data)
+        except Exception:
+            reference_data = {}
+    if not isinstance(reference_data, dict):
+        return []
+
+    ground_truth = reference_data.get("ground_truth")
+    if isinstance(ground_truth, list) and ground_truth:
+        items = []
+        for idx, row in enumerate(ground_truth):
+            if not isinstance(row, dict):
+                items.append({"id": idx, "input": str(row), "context": None})
+                continue
+            input_text = (
+                row.get("input")
+                or row.get("question")
+                or row.get("sentence")
+                or row.get("text")
+                or row.get("source")
+                or row.get("prompt")
+                or ""
+            )
+            context = row.get("context") or row.get("passage") or row.get("document")
+            items.append({
+                "id": int(row.get("id", idx)) if str(row.get("id", idx)).isdigit() else idx,
+                "input": str(input_text),
+                "context": str(context) if context is not None else None,
+            })
+        return items
+
+    source_texts = reference_data.get("source_texts")
+    if isinstance(source_texts, list):
+        contexts = reference_data.get("contexts") if isinstance(reference_data.get("contexts"), list) else []
+        return [
+            {
+                "id": idx,
+                "input": str(text),
+                "context": str(contexts[idx]) if idx < len(contexts) and contexts[idx] is not None else None,
+            }
+            for idx, text in enumerate(source_texts)
+        ]
+    return []
+
+
+@app.get('/public/dataset_questions')
+def dataset_questions() -> Any:
+    """Return benchmark inputs/questions without reference labels or answers."""
+    raw = request.args.get("dataset")
+    if not raw:
+        return jsonify({"success": False, "error": "Missing query parameter: dataset"}), 400
+    try:
+        name = validate_text(raw, "dataset")
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    dataset = None
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT name, task_type, evaluation_metric, reference_data FROM benchmark_datasets "
+                "WHERE name = %s AND active = TRUE",
+                (name,),
+            )
+            dataset = cursor.fetchone()
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    if not dataset:
+        dataset = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+    if not dataset:
+        return jsonify({"success": False, "error": "Dataset not found"}), 404
+
+    return jsonify({
+        "success": True,
+        "dataset": dataset.get("name", name),
+        "task_type": dataset.get("task_type"),
+        "questions": _questions_from_reference_data(dataset.get("reference_data")),
+    })
 
 
 def _mem_leaderboard_row_after_anchor(item, dataset_filter, single_ds, an_d, an_s, an_i):
@@ -723,6 +834,18 @@ def submit_model():
         }), 400
 
     submitter_id = resolve_submitter_id(request, data)
+    quota_submitter_id = submitter_id or submitted_by or "anonymous"
+    quota_ok, submissions_remaining, quota_resets_at = _consume_submission_quota(quota_submitter_id)
+    if not quota_ok:
+        resp = jsonify({
+            "success": False,
+            "error": "Daily submission limit reached",
+            "limit": daily_submission_limit(),
+            "resets_at": quota_resets_at,
+        })
+        resp.status_code = 429
+        resp.headers["X-Submissions-Remaining"] = "0"
+        return resp
     want_async = bool(data.get("async"))
 
     # Pull dataset metadata if available
@@ -954,10 +1077,15 @@ def submit_model():
             _EVAL_JOBS[job_id] = {"status": "pending"}
         t = threading.Thread(target=_worker, args=(job_id,), daemon=True)
         t.start()
-        return jsonify({"success": True, "job_id": job_id, "status": "pending"}), 202
+        resp = jsonify({"success": True, "job_id": job_id, "status": "pending"})
+        resp.status_code = 202
+        resp.headers["X-Submissions-Remaining"] = str(submissions_remaining)
+        return resp
 
     out = _persist_and_build_response()
-    return jsonify(out)
+    resp = jsonify(out)
+    resp.headers["X-Submissions-Remaining"] = str(submissions_remaining)
+    return resp
 
 
 @app.get("/public/eval_jobs/<job_id>")
@@ -1127,6 +1255,10 @@ def my_submissions():
         mem_raw.append({
             "submission_id": sub_row["id"],
             "dataset_name": sub_row["benchmark_dataset_name"],
+            "task_type": next(
+                (d.get("task_type") for d in _STORE["datasets"] if d.get("name") == sub_row["benchmark_dataset_name"]),
+                None,
+            ),
             "model_name": sub_row["model_name"],
             "submitted_by": sub_row.get("submitted_by"),
             "score": ev["score"],
@@ -1152,6 +1284,7 @@ def my_submissions():
         items.append({
             "submission_id": r["submission_id"],
             "dataset_name": r["dataset_name"],
+            "task_type": r.get("task_type"),
             "model_name": r["model_name"],
             "submitted_by": r["submitted_by"],
             "score": r["score"],
@@ -1916,6 +2049,12 @@ def openapi_spec():
                     "parameters": [{"name": "dataset", "in": "query", "required": True, "schema": {"type": "string"}}],
                 }
             },
+            "/public/dataset_questions": {
+                "get": {
+                    "summary": "Dataset inputs/questions without labels",
+                    "parameters": [{"name": "dataset", "in": "query", "required": True, "schema": {"type": "string"}}],
+                }
+            },
             "/public/submit_model": {
                 "post": {
                     "summary": "Submit model outputs for evaluation",
@@ -2180,6 +2319,7 @@ def add_dataset():
     try:
         name = validate_text(data.get("name"), "name")
         task_type = validate_text(data.get("task_type"), "task_type", 100)
+        evaluation_metric = validate_text(data.get("evaluation_metric", data.get("metric", "accuracy")), "evaluation_metric", 100)
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 400
     dataset_id = str(uuid.uuid4())
@@ -2188,10 +2328,28 @@ def add_dataset():
         "name": name,
         "url": data.get("url"),
         "task_type": task_type,
+        "evaluation_metric": evaluation_metric,
         "description": data.get("description"),
         "models": data.get("models", []),
     }
+    LEADERBOARD_DATA[:] = [ds for ds in LEADERBOARD_DATA if ds.get("name") != name]
     LEADERBOARD_DATA.append(new_ds)
+    reference_data = {
+        "url": data.get("url"),
+        "description": data.get("description"),
+        "source_texts": data.get("source_texts", []),
+        "ground_truth": data.get("ground_truth", []),
+    }
+    existing = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+    if existing:
+        existing.update({"task_type": task_type, "evaluation_metric": evaluation_metric, "reference_data": reference_data})
+    else:
+        _STORE["datasets"].append({
+            "name": name,
+            "task_type": task_type,
+            "evaluation_metric": evaluation_metric,
+            "reference_data": reference_data,
+        })
     return jsonify({
         "status": "success",
         "message": "Dataset added to leaderboard.",
@@ -2215,15 +2373,41 @@ def add_model():
         return jsonify({"status": "error", "message": str(e)}), 400
     for ds in LEADERBOARD_DATA:
         if ds.get("name") == dataset_name:
-            ds.setdefault("models", []).append({
+            model_row = {
                 "rank": data["rank"],
                 "model": model,
                 "score": data["score"],
                 "ci": data.get("ci"),
                 "updated": data["updated"],
-            })
+                "detailed_scores": data.get("detailed_scores"),
+            }
+            ds.setdefault("models", []).append(model_row)
             # keep models sorted by rank
             ds["models"].sort(key=lambda m: (m.get("rank") is None, m.get("rank")))
+            ds_meta = next((d for d in _STORE["datasets"] if d.get("name") == dataset_name), None)
+            metric = (ds_meta or {}).get("evaluation_metric") or ds.get("evaluation_metric") or data.get("metric") or "accuracy"
+            submission_id = len(_STORE["submissions"]) + 1
+            _STORE["submissions"].append({
+                "id": submission_id,
+                "benchmark_dataset_name": dataset_name,
+                "model_name": model,
+                "submitted_by": data.get("submitted_by", "seed_real_benchmarks@anote.ai"),
+                "submitter_id": data.get("submitter_id", "seed-real-benchmarks"),
+                "metadata": {"source": "api/leaderboard/add_model", "rank": data.get("rank"), "updated": data.get("updated")},
+                "results": [],
+                "created": utc_now(),
+            })
+            _STORE["evaluations"].append({
+                "submission_id": submission_id,
+                "score": float(data["score"]),
+                "metric": metric,
+                "evaluation_details": {
+                    "metric": metric,
+                    "metadata": {"rank": data.get("rank"), "updated": data.get("updated"), "ci": data.get("ci")},
+                    "detailed_scores": data.get("detailed_scores") if isinstance(data.get("detailed_scores"), dict) else {metric: data["score"]},
+                },
+                "created": utc_now(),
+            })
             return jsonify({"status": "success", "message": "Model added to dataset on leaderboard."})
     return jsonify({"status": "error", "message": "Dataset not found."}), 404
 
