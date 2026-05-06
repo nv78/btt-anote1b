@@ -95,7 +95,7 @@ Leaderboard/
 | Layer | Choice |
 |-------|--------|
 | Backend | Python 3.11, Flask 2.3, Authlib, PyJWT, python-dotenv |
-| Database | MySQL (optional) with automatic in-memory `_STORE` fallback |
+| Database | SQLite by default (`SQLITE_DB_PATH`), optional MySQL, in-memory `_STORE` fallback only if disk DB unavailable |
 | Frontend | React 18, Create React App, Tailwind CSS |
 | State | Redux Toolkit + Redux Persist (cross-component), Zustand (local) |
 | Auth | Google OAuth 2.0 → HS256 JWT minted by Flask; or Bearer JWT via JWKS |
@@ -142,6 +142,7 @@ GET  /public/submissions/<id>           Single submission detail
 GET  /public/export/leaderboard         CSV or JSON dump of leaderboard
 GET  /public/submission_format          Template for a dataset's submission format
 POST /public/import_hf_dataset          Import a Hugging Face dataset split
+POST /public/run_hf_model               Run a Hugging Face model on an imported dataset
 POST /api/datasets/ingest               HF ingestion alias
 GET  /public/benchmark_csvs             List available CSV benchmark files
 GET  /public/benchmark_models           List available model providers
@@ -228,7 +229,8 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 | `FLASK_SECRET_KEY` | Recommended | Flask session secret |
 | `FLASK_ENV` | Dev | Set to `production` for prod deployments |
 | `ALLOWED_ORIGINS` | Prod required | Comma-separated CORS origins |
-| `DB_HOST/USER/PASSWORD/NAME/PORT` | Optional | MySQL connection; in-memory fallback if unset |
+| `DB_HOST/USER/PASSWORD/NAME/PORT` | Optional | MySQL connection; SQLite is used when unset/unavailable |
+| `SQLITE_DB_PATH` | Optional | SQLite file path for zero-config persistence; default `./leaderboard.db` |
 | `OPENAI_API_KEY` | Optional | For OpenAI LLM evaluation in CSV benchmarks |
 | `ANTHROPIC_API_KEY` | Optional | For Anthropic LLM evaluation |
 | `GOOGLE_API_KEY` | Optional | For Gemini LLM evaluation |
@@ -268,7 +270,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 #### Backend
 - `app.py` is 2300+ lines — should be split into blueprints (`leaderboard`, `admin`, `eval`, `auth`, `metrics`).
 - No async background job queue for long submissions; `eval_jobs` API stub exists but jobs are currently synchronous.
-- MySQL schema migrations are manual; no Alembic or similar.
+- SQLite schema migrations are manual; optional MySQL remains supported but no Alembic or similar exists.
 - No rate-limiting on read endpoints; only write endpoints are rate-limited.
 
 #### Testing
@@ -287,7 +289,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 ### Always
 1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 22 tests must pass.
 2. **Run `npm run build` from `frontend/` before finishing.** Build must succeed (warnings OK, errors not).
-3. Keep the **in-memory `_STORE` fallback working** — never assume MySQL is available.
+3. Keep the **SQLite default and in-memory `_STORE` fallback working** — never assume MySQL is available.
 4. Both `backend/tests/` and frontend build checks must stay green.
 
 ### Backend style

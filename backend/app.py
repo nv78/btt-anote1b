@@ -23,6 +23,8 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import StringIO
+from pathlib import Path
+import sqlite3
 from time import time
 from typing import Any
 from urllib.parse import quote
@@ -71,22 +73,84 @@ except ImportError:
         my_submissions_cursor_encode,
     )
 
-# Optional MySQL connection
-def get_db_connection():
+class SQLiteCursorAdapter:
+    def __init__(self, cursor: Any) -> None:
+        self._cursor = cursor
+
+    @property
+    def lastrowid(self) -> Any:
+        return self._cursor.lastrowid
+
+    def execute(self, query: str, params: tuple | list = ()) -> "SQLiteCursorAdapter":
+        query = query.replace("%s", "?")
+        self._cursor.execute(query, tuple(params or ()))
+        return self
+
+    def fetchone(self) -> dict[str, Any] | None:
+        row = self._cursor.fetchone()
+        return _sqlite_row_to_dict(row) if row is not None else None
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return [_sqlite_row_to_dict(row) for row in self._cursor.fetchall()]
+
+    def close(self) -> None:
+        self._cursor.close()
+
+
+def _sqlite_row_to_dict(row: Any) -> dict[str, Any]:
+    out = dict(row)
+    for key in ("created", "submitted_at"):
+        value = out.get(key)
+        if isinstance(value, str):
+            parsed = _parse_iso_datetime(value.replace(" ", "T"))
+            if parsed is not None:
+                out[key] = parsed
+    return out
+
+
+def _sqlite_db_path() -> Path:
+    return Path(os.getenv("SQLITE_DB_PATH", "./leaderboard.db")).expanduser()
+
+
+def _open_sqlite_connection() -> tuple[Any, SQLiteCursorAdapter]:
+    db_path = _sqlite_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    _ensure_sqlite_schema(conn)
+    return conn, SQLiteCursorAdapter(conn.cursor())
+
+
+def _ensure_sqlite_schema(conn: Any) -> None:
+    schema_path = Path(__file__).resolve().parent / "database" / "schema_leaderboard.sql"
+    conn.executescript(schema_path.read_text())
+    conn.commit()
+
+
+def _mysql_connection_configured() -> bool:
+    return any(os.getenv(k) for k in ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_PORT"))
+
+
+def get_db_connection() -> tuple[Any | None, Any | None]:
+    if _mysql_connection_configured():
+        try:
+            import mysql.connector  # type: ignore
+            conn = mysql.connector.connect(
+                host=os.getenv('DB_HOST', 'localhost'),
+                user=os.getenv('DB_USER', 'root'),
+                password=os.getenv('DB_PASSWORD', ''),
+                database=os.getenv('DB_NAME', 'agents'),
+                port=int(os.getenv('DB_PORT', '3306')),
+            )
+            cursor = conn.cursor(dictionary=True)
+            return conn, cursor
+        except Exception as e:
+            logger.warning("mysql_connection_unavailable_using_sqlite", extra={"error": str(e)})
     try:
-        import mysql.connector  # type: ignore
-        conn = mysql.connector.connect(
-            host=os.getenv('DB_HOST', 'localhost'),
-            user=os.getenv('DB_USER', 'root'),
-            password=os.getenv('DB_PASSWORD', ''),
-            database=os.getenv('DB_NAME', 'agents'),
-            port=int(os.getenv('DB_PORT', '3306')),
-        )
-        cursor = conn.cursor(dictionary=True)
-        return conn, cursor
+        return _open_sqlite_connection()
     except Exception as e:
-        # Database might not be configured in local dev. Return None to use in-memory fallback.
-        logger.warning("db_connection_unavailable", extra={"error": str(e)})
+        logger.warning("sqlite_connection_unavailable", extra={"error": str(e)})
         return None, None
 
 
@@ -678,7 +742,7 @@ def get_leaderboard():
                 "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
                 "JOIN evaluation_results er ON er.model_submission_id = ms.id "
             )
-            order = "ORDER BY bd.name ASC, er.score DESC, ms.id DESC "
+            order = " ORDER BY bd.name ASC, er.score DESC, ms.id DESC "
 
             if use_cursor:
                 wk = list(params)
@@ -2042,6 +2106,7 @@ def openapi_spec():
             "/public/datasets": {"get": {"summary": "List public datasets"}},
             "/public/add_dataset": {"post": {"summary": "Create a public dataset", "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}]}},
             "/public/import_hf_dataset": {"post": {"summary": "Import a Hugging Face dataset split", "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}]}},
+            "/public/run_hf_model": {"post": {"summary": "Run a Hugging Face model on an imported dataset", "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}]}},
             "/api/datasets/ingest": {"post": {"summary": "Ingest a dataset from a configured source", "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}]}},
             "/public/submission_format": {
                 "get": {
@@ -2216,6 +2281,276 @@ def import_hf_dataset_public():
     })
 
 
+def _dataset_by_name(dataset_name: str) -> dict[str, Any] | None:
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT id, name, task_type, evaluation_metric, reference_data FROM benchmark_datasets WHERE name = %s AND active = TRUE",
+                (dataset_name,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return row
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    return next((d for d in _STORE["datasets"] if d.get("name") == dataset_name), None)
+
+
+def _reference_data_dict(reference_data: object) -> dict[str, Any]:
+    if isinstance(reference_data, str):
+        try:
+            parsed = json.loads(reference_data)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return reference_data if isinstance(reference_data, dict) else {}
+
+
+def _source_items_from_reference_data(reference_data: dict[str, Any]) -> list[dict[str, Any]]:
+    ground_truth = reference_data.get("ground_truth")
+    if isinstance(ground_truth, list) and ground_truth:
+        items = []
+        for idx, row in enumerate(ground_truth):
+            row = row if isinstance(row, dict) else {"question": str(row)}
+            input_text = row.get("question") or row.get("sentence") or row.get("text") or row.get("input") or row.get("source") or ""
+            context = row.get("context") or row.get("passage") or row.get("document") or ""
+            items.append({"id": idx, "input": str(input_text), "context": str(context) if context is not None else ""})
+        return items
+    source_texts = reference_data.get("source_texts") if isinstance(reference_data.get("source_texts"), list) else []
+    contexts = reference_data.get("contexts") if isinstance(reference_data.get("contexts"), list) else []
+    return [
+        {"id": idx, "input": str(text), "context": str(contexts[idx]) if idx < len(contexts) else ""}
+        for idx, text in enumerate(source_texts)
+    ]
+
+
+def _answers_from_reference_data(reference_data: dict[str, Any], task_type: str, ids: list[int]) -> tuple[list[Any] | None, list[Any] | None, list[Any] | None, list[Any] | None]:
+    def by_key(key: str) -> list[Any] | None:
+        values = reference_data.get(key)
+        if not isinstance(values, list):
+            return None
+        try:
+            return [values[i] for i in ids]
+        except Exception:
+            return None
+
+    labels = by_key("labels")
+    entities = by_key("entities")
+    answers = by_key("answers")
+    translations = by_key("reference_translations")
+    gt = reference_data.get("ground_truth")
+    if isinstance(gt, list):
+        rows = [gt[i] for i in ids if 0 <= i < len(gt)]
+        if len(rows) == len(ids):
+            row_answers = [r.get("answer") if isinstance(r, dict) else r for r in rows]
+            if task_type == "text_classification" and labels is None:
+                labels = row_answers
+            elif task_type == "named_entity_recognition" and entities is None:
+                entities = row_answers
+            elif task_type in ("document_qa", "line_qa", "retrieval") and answers is None:
+                answers = row_answers
+            elif task_type == "translation" and translations is None:
+                translations = row_answers
+    return labels, entities, answers, translations
+
+
+def _normalize_hf_classification_label(raw_label: object, label_names: list[Any] | None) -> str:
+    label = str(raw_label).strip()
+    lower = label.lower()
+    if lower.startswith("label_"):
+        try:
+            idx = int(lower.split("_", 1)[1])
+            if label_names and 0 <= idx < len(label_names):
+                return str(label_names[idx]).strip().lower()
+        except Exception:
+            pass
+    return lower
+
+
+def _run_hf_predictions(model_id: str, task_type: str, items: list[dict[str, Any]], batch_size: int, reference_data: dict[str, Any]) -> list[Any]:
+    try:
+        from transformers import pipeline  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Install optional transformers/torch dependencies to run Hugging Face models.") from exc
+
+    if task_type == "text_classification":
+        pipe = pipeline("text-classification", model=model_id, tokenizer=model_id)
+        label_names = reference_data.get("label_names") if isinstance(reference_data.get("label_names"), list) else None
+        outputs: list[Any] = []
+        for start in range(0, len(items), batch_size):
+            batch = [it["input"] for it in items[start:start + batch_size]]
+            chunk = pipe(batch, truncation=True)
+            for row in chunk:
+                if isinstance(row, list):
+                    row = row[0] if row else {}
+                outputs.append(_normalize_hf_classification_label((row or {}).get("label", ""), label_names))
+        return outputs
+
+    if task_type in ("document_qa", "line_qa"):
+        pipe = pipeline("question-answering", model=model_id, tokenizer=model_id)
+        outputs = []
+        for it in items:
+            result = pipe(question=it["input"], context=it.get("context") or it["input"])
+            outputs.append(result.get("answer", "") if isinstance(result, dict) else "")
+        return outputs
+
+    if task_type == "named_entity_recognition":
+        pipe = pipeline("ner", model=model_id, tokenizer=model_id, aggregation_strategy="simple")
+        outputs = []
+        for it in items:
+            result = pipe(it["input"])
+            outputs.append([
+                (str(ent.get("word", "")).strip(), str(ent.get("entity_group") or ent.get("entity") or "").strip())
+                for ent in result or []
+                if isinstance(ent, dict)
+            ])
+        return outputs
+
+    if task_type == "translation":
+        pipe = pipeline("translation", model=model_id, tokenizer=model_id)
+        outputs = []
+        for start in range(0, len(items), batch_size):
+            batch = [it["input"] for it in items[start:start + batch_size]]
+            chunk = pipe(batch)
+            for row in chunk:
+                if isinstance(row, list):
+                    row = row[0] if row else {}
+                outputs.append((row or {}).get("translation_text") or (row or {}).get("generated_text") or "")
+        return outputs
+
+    raise ValueError(f"HF model runner does not support task_type={task_type!r}")
+
+
+def _persist_evaluated_submission(dataset_name: str, model_name: str, submitted_by: str, submitter_id: str, model_results: list[Any], score: float, metric: str, eval_details: dict[str, Any]) -> int:
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute("SELECT id FROM benchmark_datasets WHERE name = %s", (dataset_name,))
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Dataset not found")
+            cursor.execute(
+                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, submitter_id, model_results) VALUES (%s, %s, %s, %s, %s)",
+                (row["id"], model_name, submitted_by, submitter_id, json.dumps(model_results)),
+            )
+            submission_id = cursor.lastrowid
+            cursor.execute(
+                "INSERT INTO evaluation_results (model_submission_id, score, evaluation_details) VALUES (%s, %s, %s)",
+                (submission_id, float(score), json.dumps(eval_details)),
+            )
+            conn.commit()
+            return int(submission_id)
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    submission_id = len(_STORE["submissions"]) + 1
+    _STORE["submissions"].append({
+        "id": submission_id,
+        "benchmark_dataset_name": dataset_name,
+        "model_name": model_name,
+        "submitted_by": submitted_by,
+        "submitter_id": submitter_id,
+        "metadata": eval_details.get("metadata"),
+        "results": model_results,
+        "created": utc_now(),
+    })
+    _STORE["evaluations"].append({
+        "submission_id": submission_id,
+        "score": float(score),
+        "metric": metric,
+        "evaluation_details": eval_details,
+        "created": utc_now(),
+    })
+    return submission_id
+
+
+def _run_hf_model_job(data: dict[str, Any]) -> dict[str, Any]:
+    dataset_name = validate_text(data.get("dataset_name"), "dataset_name")
+    model_id = validate_text(data.get("model_id"), "model_id", 255)
+    batch_size = max(1, min(128, int(data.get("batch_size", 16))))
+    dataset = _dataset_by_name(dataset_name)
+    if not dataset:
+        raise ValueError("Dataset not found")
+    task_type = str(dataset.get("task_type") or "text_classification")
+    metric = str(dataset.get("evaluation_metric") or "accuracy")
+    reference_data = _reference_data_dict(dataset.get("reference_data"))
+    items = _source_items_from_reference_data(reference_data)
+    if not items:
+        raise ValueError("Dataset has no runnable source texts")
+    ids = [int(it["id"]) for it in items]
+    predictions = _run_hf_predictions(model_id, task_type, items, batch_size, reference_data)
+    labels, entities, answers, translations = _answers_from_reference_data(reference_data, task_type, ids)
+    try:
+        from eval_core.leaderboard_bridge import normalize_eval_metric, run_personal_eval  # type: ignore
+    except ImportError:
+        from backend.eval_core.leaderboard_bridge import normalize_eval_metric, run_personal_eval  # type: ignore
+    score, detailed_scores = run_personal_eval(task_type, metric, ids, labels, entities, answers, translations, predictions)
+    metric_norm = normalize_eval_metric(metric, task_type)
+    eval_details = {
+        "metric": metric_norm,
+        "metadata": {"source": "hf_model_runner", "model_id": model_id, "batch_size": batch_size},
+        "detailed_scores": detailed_scores,
+    }
+    submission_id = _persist_evaluated_submission(
+        dataset_name,
+        model_id,
+        "hf_model_runner@anote.ai",
+        f"hf-model:{model_id}"[:255],
+        predictions,
+        float(score),
+        metric_norm,
+        eval_details,
+    )
+    return {
+        "success": True,
+        "submission_id": submission_id,
+        "dataset_name": dataset_name,
+        "model_id": model_id,
+        "score": float(score),
+        "metric": metric_norm,
+        "detailed_scores": detailed_scores,
+    }
+
+
+@app.post('/public/run_hf_model')
+@rate_limit("RUN_HF_MODEL_RATE_LIMIT", "3/minute")
+@require_api_key
+def run_hf_model_public() -> Any:
+    """Run an installed Hugging Face pipeline model against a stored dataset."""
+    data = request.get_json(silent=True) or {}
+    if data.get("async"):
+        job_id = str(uuid.uuid4())
+        with _EVAL_JOBS_LOCK:
+            _EVAL_JOBS[job_id] = {"status": "pending", "kind": "hf_model"}
+
+        def _worker() -> None:
+            try:
+                out = _run_hf_model_job(data)
+                with _EVAL_JOBS_LOCK:
+                    _EVAL_JOBS[job_id] = {"status": "completed", **out}
+            except Exception as e:
+                with _EVAL_JOBS_LOCK:
+                    _EVAL_JOBS[job_id] = {"status": "failed", "error": str(e)}
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return jsonify({"success": True, "job_id": job_id, "status": "pending"}), 202
+    try:
+        return jsonify(_run_hf_model_job(data))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.exception("run_hf_model_failed", extra={"error": str(e)})
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.post('/api/datasets/ingest')
 @rate_limit("IMPORT_DATASET_RATE_LIMIT", "5/minute")
 @require_api_key
@@ -2350,6 +2685,28 @@ def add_dataset():
             "evaluation_metric": evaluation_metric,
             "reference_data": reference_data,
         })
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute("SELECT id FROM benchmark_datasets WHERE name = %s", (name,))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute(
+                    "UPDATE benchmark_datasets SET task_type = %s, evaluation_metric = %s, reference_data = %s, active = TRUE WHERE name = %s",
+                    (task_type, evaluation_metric, json.dumps(reference_data), name),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO benchmark_datasets (name, task_type, evaluation_metric, reference_data, active) VALUES (%s, %s, %s, %s, TRUE)",
+                    (name, task_type, evaluation_metric, json.dumps(reference_data)),
+                )
+            conn.commit()
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
     return jsonify({
         "status": "success",
         "message": "Dataset added to leaderboard.",
@@ -2371,8 +2728,31 @@ def add_model():
         model = validate_text(data.get("model"), "model")
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 400
-    for ds in LEADERBOARD_DATA:
-        if ds.get("name") == dataset_name:
+    target_dataset = next((ds for ds in LEADERBOARD_DATA if ds.get("name") == dataset_name), None)
+    if not target_dataset:
+        conn_lookup, cursor_lookup = get_db_connection()
+        if conn_lookup and cursor_lookup:
+            try:
+                cursor_lookup.execute(
+                    "SELECT name, task_type, evaluation_metric, reference_data FROM benchmark_datasets WHERE name = %s AND active = TRUE",
+                    (dataset_name,),
+                )
+                row = cursor_lookup.fetchone()
+                if row:
+                    target_dataset = {
+                        "name": row["name"],
+                        "task_type": row.get("task_type"),
+                        "evaluation_metric": row.get("evaluation_metric"),
+                        "models": [],
+                    }
+                    LEADERBOARD_DATA.append(target_dataset)
+            finally:
+                try:
+                    cursor_lookup.close()
+                    conn_lookup.close()
+                except Exception:
+                    pass
+    if target_dataset:
             model_row = {
                 "rank": data["rank"],
                 "model": model,
@@ -2381,11 +2761,11 @@ def add_model():
                 "updated": data["updated"],
                 "detailed_scores": data.get("detailed_scores"),
             }
-            ds.setdefault("models", []).append(model_row)
+            target_dataset.setdefault("models", []).append(model_row)
             # keep models sorted by rank
-            ds["models"].sort(key=lambda m: (m.get("rank") is None, m.get("rank")))
+            target_dataset["models"].sort(key=lambda m: (m.get("rank") is None, m.get("rank")))
             ds_meta = next((d for d in _STORE["datasets"] if d.get("name") == dataset_name), None)
-            metric = (ds_meta or {}).get("evaluation_metric") or ds.get("evaluation_metric") or data.get("metric") or "accuracy"
+            metric = (ds_meta or {}).get("evaluation_metric") or target_dataset.get("evaluation_metric") or data.get("metric") or "accuracy"
             submission_id = len(_STORE["submissions"]) + 1
             _STORE["submissions"].append({
                 "id": submission_id,
@@ -2408,6 +2788,41 @@ def add_model():
                 },
                 "created": utc_now(),
             })
+            conn, cursor = get_db_connection()
+            if conn and cursor:
+                try:
+                    cursor.execute("SELECT id FROM benchmark_datasets WHERE name = %s", (dataset_name,))
+                    ds_row = cursor.fetchone()
+                    if not ds_row:
+                        return jsonify({"status": "error", "message": "Dataset not found."}), 404
+                    eval_details = {
+                        "metric": metric,
+                        "metadata": {"rank": data.get("rank"), "updated": data.get("updated"), "ci": data.get("ci")},
+                        "detailed_scores": data.get("detailed_scores") if isinstance(data.get("detailed_scores"), dict) else {metric: data["score"]},
+                    }
+                    cursor.execute(
+                        "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, submitter_id, model_results) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (
+                            ds_row["id"],
+                            model,
+                            data.get("submitted_by", "seed_real_benchmarks@anote.ai"),
+                            data.get("submitter_id", "seed-real-benchmarks"),
+                            json.dumps([]),
+                        ),
+                    )
+                    db_submission_id = cursor.lastrowid
+                    cursor.execute(
+                        "INSERT INTO evaluation_results (model_submission_id, score, evaluation_details) VALUES (%s, %s, %s)",
+                        (db_submission_id, float(data["score"]), json.dumps(eval_details)),
+                    )
+                    conn.commit()
+                finally:
+                    try:
+                        cursor.close()
+                        conn.close()
+                    except Exception:
+                        pass
             return jsonify({"status": "success", "message": "Model added to dataset on leaderboard."})
     return jsonify({"status": "error", "message": "Dataset not found."}), 404
 

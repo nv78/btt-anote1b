@@ -37,14 +37,14 @@ Leaderboard/
 | `models.py` | Model provider wrappers (OpenAI, Anthropic, Google, Ollama, echo) |
 | `csv_bench.py` | CSV benchmark utilities: task inference, scoring, dataset listing |
 | `sdk/leaderboard_sdk.py` | Python client SDK (`LeaderboardClient`) for API access |
-| `database/schema.sql` | MySQL schema: `benchmark_datasets`, `model_submissions`, `evaluation_results` |
+| `database/schema_leaderboard.sql` | SQLite default schema: `benchmark_datasets`, `model_submissions`, `evaluation_results` |
 | `database/init_db_dev.py` | Dev database initialization script |
 | `examples/seed_demo.py` | Seeds demo data into a running backend |
 | `pytest/` | Test suite (see Testing section) |
 | `.env.example` | Template for environment variables |
 | `requirements.txt` | Python dependencies |
 
-**Storage:** MySQL primary store with automatic in-memory (`_STORE` dict) fallback when DB is unavailable.
+**Storage:** SQLite is the default persistent store (`SQLITE_DB_PATH`, default `./leaderboard.db`); MySQL remains optional, with `_STORE` as last-resort fallback.
 
 **Optional dependencies:** `bert-score`, `mysql-connector-python`, `openai`, `anthropic`, `google-generativeai`, `transformers`, `torch` are all optional — the backend degrades gracefully if missing.
 
@@ -71,7 +71,7 @@ Leaderboard/
 |-------|-----------|
 | Backend language | Python 3.8+ |
 | Backend framework | Flask 2.3+ |
-| Database | MySQL (optional; in-memory fallback) |
+| Database | SQLite default; optional MySQL; in-memory fallback |
 | Frontend language | JavaScript (ES2020+) |
 | Frontend framework | React 18 |
 | UI library | Material-UI (MUI) v5 |
@@ -146,6 +146,7 @@ LEADERBOARD_API_BASE=http://localhost:5001 python backend/examples/seed_demo.py
 | `DB_PASSWORD` | — | MySQL password |
 | `DB_NAME` | `agents` | MySQL database |
 | `DB_PORT` | `3306` | MySQL port |
+| `SQLITE_DB_PATH` | `./leaderboard.db` | SQLite file used when MySQL is unset/unavailable |
 | `ALLOWED_ORIGINS` | local React origins in development | CORS allowed origins. Required outside development. |
 | `LEADERBOARD_API_BASE` | `http://localhost:5001` | Used by seed/test scripts |
 | `LEADERBOARD_API_KEYS` | — | Comma-separated API keys. When set, write endpoints require `X-API-Key`. |
@@ -182,6 +183,7 @@ When running locally, override with `REACT_APP_API_ENDPOINT=http://localhost:500
 | GET | `/public/get_leaderboard` | Ranked model results |
 | GET | `/public/export/leaderboard` | Export leaderboard rows |
 | POST | `/public/import_hf_dataset` | Import a Hugging Face dataset split |
+| POST | `/public/run_hf_model` | Run a Hugging Face model on an imported dataset |
 | POST | `/api/datasets/ingest` | Ingestion-compatible dataset import endpoint |
 | GET | `/api/metrics` | Metric catalog |
 | GET | `/api/metrics/task/<task_type>` | Task-specific metric catalog |
@@ -238,7 +240,7 @@ Key test scenarios:
 ### Backend
 
 - **Optional imports:** Wrap optional deps in `try/except ImportError` with a flag (e.g., `BERT_SCORE_AVAILABLE = False`). Never fail hard on missing optional packages.
-- **DB fallback:** Always write logic to work with both MySQL (`get_db_connection()`) and the in-memory `_STORE` dict.
+- **DB fallback:** Always write logic to work with SQLite/MySQL via `get_db_connection()` and the in-memory `_STORE` dict.
 - **BLEU vs BERTScore:** BLEU scores 0 for Asian scripts (Japanese, Chinese, Korean) — always use BERTScore for those. Spanish/Arabic BLEU is meaningful (~0.4).
 - **Type hints:** Use Python type annotations for all new functions.
 - **Lazy imports:** Import heavy modules (e.g., `csv_bench`) inside the function scope when called infrequently.
@@ -253,7 +255,7 @@ Key test scenarios:
 
 ### General
 
-- **No database required:** The project must remain functional without MySQL. Do not break the in-memory fallback.
+- **No MySQL required:** The project must remain functional with local SQLite and still keep the in-memory fallback.
 - **No API keys required:** Core functionality (browsing leaderboard, running CSV benchmarks with `echo` provider) must work without any API keys configured.
 - **Port 5001 for backend:** macOS reserves port 5000; use 5001 locally.
 
@@ -261,7 +263,7 @@ Key test scenarios:
 
 ## Database Schema
 
-Three tables in MySQL (all have an `id` PK and `created` timestamp):
+Three tables in SQLite by default (all have an `id` PK and `created` timestamp):
 
 - **`benchmark_datasets`** — available benchmarks (`name`, `task_type`, `evaluation_metric`, `reference_data`, `active`)
 - **`model_submissions`** — model predictions (`benchmark_dataset_id` FK, `model_name`, `submitted_by`, `model_results`)

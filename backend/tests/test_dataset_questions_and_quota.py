@@ -76,3 +76,83 @@ def test_submit_model_daily_quota(monkeypatch):
         assert data["limit"] == 2
         assert data["resets_at"].endswith("+00:00")
         assert r3.headers["X-Submissions-Remaining"] == "0"
+
+
+def test_seed_real_benchmarks_persist_in_sqlite(monkeypatch, tmp_path):
+    from scripts.seed_real_benchmarks import DATASETS, detailed_scores
+
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "leaderboard.db"))
+    for key in ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_PORT"):
+        monkeypatch.delenv(key, raising=False)
+    reset_store()
+    app_module.LEADERBOARD_DATA.clear()
+
+    with app.test_client() as c:
+        for dataset in DATASETS:
+            r = c.post("/api/leaderboard/add_dataset", json={
+                "name": dataset["name"],
+                "task_type": dataset["task_type"],
+                "evaluation_metric": dataset["evaluation_metric"],
+                "url": dataset["url"],
+                "description": f"Seeded benchmark card for {dataset['name']}.",
+            })
+            assert r.status_code == 200, r.get_data(as_text=True)
+            for model in dataset["models"]:
+                r = c.post("/api/leaderboard/add_model", json={
+                    **model,
+                    "dataset_name": dataset["name"],
+                    "detailed_scores": detailed_scores(
+                        dataset["task_type"],
+                        dataset["evaluation_metric"],
+                        float(model["score"]),
+                    ),
+                })
+                assert r.status_code == 200, r.get_data(as_text=True)
+
+    reset_store()
+    app_module.LEADERBOARD_DATA.clear()
+
+    with app.test_client() as restarted:
+        r = restarted.get("/public/get_leaderboard?page_size=100")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["success"] is True
+        rows = data["leaderboard"]
+        seeded_names = {dataset["name"] for dataset in DATASETS}
+        assert len(rows) == sum(len(dataset["models"]) for dataset in DATASETS)
+        assert seeded_names <= {row["dataset_name"] for row in rows}
+
+
+def test_run_hf_model_route_with_mocked_predictions(monkeypatch, tmp_path):
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "leaderboard.db"))
+    for key in ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_PORT"):
+        monkeypatch.delenv(key, raising=False)
+    reset_store()
+    app_module.LEADERBOARD_DATA.clear()
+
+    def fake_predictions(model_id, task_type, items, batch_size, reference_data):
+        return ["positive" for _ in items]
+
+    monkeypatch.setattr(app_module, "_run_hf_predictions", fake_predictions)
+
+    with app.test_client() as c:
+        r = c.post("/public/add_dataset", json={
+            "name": "hf_runner_mock",
+            "task_type": "text_classification",
+            "evaluation_metric": "accuracy",
+            "reference_data": {"source_texts": ["great"], "labels": ["positive"]},
+        })
+        assert r.status_code == 200
+        r = c.post("/public/run_hf_model", json={
+            "dataset_name": "hf_runner_mock",
+            "model_id": "mock/model",
+            "batch_size": 16,
+            "async": False,
+        })
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["success"] is True
+        assert data["score"] == 1.0
+        assert data["submission_id"] >= 1

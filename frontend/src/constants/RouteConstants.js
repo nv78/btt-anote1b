@@ -8,3 +8,4 @@ export const oauthCallbackPath = "/oauth/callback";
 export const evaluationsPath = "/evaluations";
 export const csvBenchmarksPath = "/benchmarks";
 export const addDatasetPath = "/datasets/new";
+export const createLeaderboardPath = "/create-leaderboard";
