@@ -14,6 +14,40 @@ function humanizeMetricKey(metric) {
     .replace(/\b([a-z])/g, (c) => c.toUpperCase());
 }
 
+function taskBadgeMeta(taskType) {
+  const key = String(taskType || "").toLowerCase();
+  const badges = {
+    text_classification: {
+      label: "Classification",
+      className: "bg-blue-500/15 text-blue-200 border-blue-400/30",
+    },
+    retrieval: {
+      label: "Retrieval",
+      className: "bg-purple-500/15 text-purple-200 border-purple-400/30",
+    },
+    document_qa: {
+      label: "Q&A",
+      className: "bg-green-500/15 text-green-200 border-green-400/30",
+    },
+    translation: {
+      label: "Translation",
+      className: "bg-orange-500/15 text-orange-200 border-orange-400/30",
+    },
+    named_entity_recognition: {
+      label: "NER",
+      className: "bg-red-500/15 text-red-200 border-red-400/30",
+    },
+    ner: {
+      label: "NER",
+      className: "bg-red-500/15 text-red-200 border-red-400/30",
+    },
+  };
+  return badges[key] || {
+    label: humanizeMetricKey(taskType) || "Task",
+    className: "bg-gray-700/60 text-gray-300 border-gray-600/50",
+  };
+}
+
 /** Extra numeric detailed_scores keys for leaderboard grid (excluding primary metric alias). */
 function extraMetricKeys(models, evaluationMetric) {
   const pm = (evaluationMetric || "").toLowerCase().trim().replace(/\s+/g, "_");
@@ -64,13 +98,17 @@ function groupLeaderboardEntries(entries) {
     if (!acc[key]) {
       acc[key] = {
         name: key,
+        url: e.url || e.dataset_url || e.metadata?.url,
         evaluation_metric: e.evaluation_metric,
         task_type: e.task_type,
+        submission_count: typeof e.submission_count === "number" ? e.submission_count : 0,
         models: [],
       };
     } else {
       if (e.task_type && !acc[key].task_type) acc[key].task_type = e.task_type;
       if (e.evaluation_metric && !acc[key].evaluation_metric) acc[key].evaluation_metric = e.evaluation_metric;
+      if ((e.url || e.dataset_url || e.metadata?.url) && !acc[key].url) acc[key].url = e.url || e.dataset_url || e.metadata?.url;
+      if (typeof e.submission_count === "number") acc[key].submission_count = Math.max(acc[key].submission_count || 0, e.submission_count);
     }
     acc[key].models.push({
       model: e.model_name,
@@ -85,6 +123,7 @@ function groupLeaderboardEntries(entries) {
   }, {});
   return Object.values(grouped).map((d) => {
     const next = { ...d, models: [...d.models] };
+    if (!next.submission_count) next.submission_count = next.models.length;
     next.models.sort((a, b) => {
       const ca =
         typeof a.composite_score === "number"
@@ -220,6 +259,7 @@ const Leaderboard = () => {
           url: d.url,
           task_type: d.task_type,
           evaluation_metric: d.evaluation_metric || "",
+          submission_count: Array.isArray(d.models) ? d.models.length : 0,
           models: (d.models || []).map((m) => ({
             rank: m.rank,
             model: m.model,
@@ -1230,9 +1270,10 @@ const Leaderboard = () => {
   ];
   const navigate = useNavigate();
 
+  const showDemoCards = isDemoMode && apiFailed;
   const displayDatasets = viewMode === 'curated'
-    ? (curatedDatasets.length ? curatedDatasets : datasets)
-    : (liveDatasets.length ? liveDatasets : datasets);
+    ? (curatedDatasets.length ? curatedDatasets : (showDemoCards ? datasets : []))
+    : (liveDatasets.length ? liveDatasets : (showDemoCards ? datasets : []));
 
   const rankBadge = (rank) => {
     if (rank === 1) return <span title="1st place" className="mr-1">🥇</span>;
@@ -1334,11 +1375,27 @@ const Leaderboard = () => {
                 sx={{ bgcolor: "rgba(75,85,99,0.28)", borderRadius: "1rem" }}
               />
             ))
+          : isDemoMode && !apiFailed
+            ? (
+              <div className="md:col-span-2 rounded-2xl border border-gray-800 bg-[#0d1421] px-6 py-12 text-center">
+                <div className="text-lg font-semibold text-white">No benchmark results yet.</div>
+                <p className="mt-2 text-sm text-gray-400">Be the first to submit a model!</p>
+                <button
+                  type="button"
+                  onClick={() => navigate(submittoleaderboardPath)}
+                  className="mt-5 inline-flex items-center justify-center rounded-lg bg-[#defe47] px-4 py-2 text-sm font-semibold text-black hover:bg-[#e8ff70] transition-colors"
+                >
+                  Submit a model
+                </button>
+              </div>
+            )
           : displayDatasets.map((dataset, index) => {
           const dkey = dataset.name || `idx-${index}`;
           const showAdv = !!advancedMetrics[dkey];
           const showAllRanks = !!expandedRankDepth[dkey];
           const extras = showAdv ? [] : extraMetricKeys(dataset.models, dataset.evaluation_metric);
+          const taskBadge = taskBadgeMeta(dataset.task_type);
+          const submissionCount = typeof dataset.submission_count === "number" ? dataset.submission_count : dataset.models.length;
           const gridTemplateColumns = [
             "3rem",
             "minmax(0,1fr)",
@@ -1350,39 +1407,51 @@ const Leaderboard = () => {
           return (
           <div
             key={dataset.name || index}
-            className="flex flex-col w-full bg-[#0d1421] rounded-2xl border border-gray-800/80 hover:border-[#defe47]/30 transition-all duration-200 shadow-xl shadow-black/20 overflow-hidden group"
+            className="flex flex-col w-full bg-[#0d1421] rounded-2xl border border-gray-800/80 hover:border-gray-600 transition-colors duration-150 shadow-xl shadow-black/20 overflow-hidden group"
           >
             {/* Card header */}
             <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-gray-800/60">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center min-w-0">
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
                   <h2 className="text-base font-bold text-white leading-snug truncate" title={dataset.name}>
                     {dataset.name}
                   </h2>
+                  {dataset.url && (
+                    <a
+                      href={dataset.url}
+                      className="text-xs text-gray-500 hover:text-[#defe47] transition-colors shrink-0"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Open source for ${dataset.name}`}
+                    >
+                      ↗ Source
+                    </a>
+                  )}
                   {isDemoMode && (
                     <span className="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded-full ml-2 shrink-0">
                       Demo
                     </span>
                   )}
                 </div>
-                {(dataset.task_type || dataset.evaluation_metric) && (
-                  <span className="mt-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-800/80 text-[11px] text-gray-400 font-medium border border-gray-700/50">
-                    {[humanizeMetricKey(dataset.task_type), humanizeMetricKey(dataset.evaluation_metric)].filter(Boolean).join(" · ")}
-                  </span>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {dataset.task_type && (
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${taskBadge.className}`}>
+                      {taskBadge.label}
+                    </span>
+                  )}
+                  {dataset.evaluation_metric && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-gray-800/80 text-[11px] text-gray-400 font-medium border border-gray-700/50">
+                      {humanizeMetricKey(dataset.evaluation_metric)}
+                    </span>
+                  )}
+                </div>
+                {typeof submissionCount === "number" && (
+                  <div className="mt-1.5 text-xs text-gray-500">
+                    {submissionCount} {submissionCount === 1 ? "submission" : "submissions"}
+                  </div>
                 )}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                {dataset.url && (
-                  <a
-                    href={dataset.url}
-                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#defe47] hover:border-[#defe47]/30 transition-colors"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Open dataset ${dataset.name}`}
-                  >
-                    Dataset ↗
-                  </a>
-                )}
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#28b2fb] hover:border-[#28b2fb]/30 transition-colors"

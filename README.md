@@ -259,8 +259,8 @@ Run the backend on port 5001 and seed example data, then start the frontend.
 
 3) Frontend
 - In `frontend/`: `npm install` (uses `frontend/.npmrc` so peer conflicts resolve on modern npm)
-- Dev server defaults: **`frontend/.env.development`** sets `PORT=3001` (avoids clashing with another app on 3000) and `REACT_APP_API_BASE` to match your Flask port (e.g. `5005`). Edit that file if your API port differs.
-- Start: `npm start` (or override in one shot: `PORT=3001 REACT_APP_API_BASE=http://127.0.0.1:5005 npm start`)
+- Dev server defaults: **`frontend/.env.development`** sets `PORT=3001` (avoids clashing with another app on 3000) and `REACT_APP_API_BASE` to match your Flask port (e.g. `5001`). Edit that file if your API port differs.
+- Start: `npm start` (or override in one shot: `PORT=3001 REACT_APP_API_BASE=http://127.0.0.1:5001 npm start`)
 - The Flask app allows CORS from `localhost` / `127.0.0.1` on ports **3000** and **3001** in development. **Restart the backend** after pulling changes so CORS picks up port 3001. For a custom port, set `ALLOWED_ORIGINS` (comma-separated) when starting Flask.
 - Open the Evaluations page to see demo scores populate.
 
@@ -281,6 +281,10 @@ Notes
 - Hugging Face imports require the optional `datasets` package:
   - `pip install datasets`
 
+Seed data and stale local DBs:
+- SQLite is the default local persistence layer. If you added new seed datasets and the leaderboard does not show them, delete `backend/leaderboard.db` and restart the backend. The auto-seed hook will recreate the database with all current built-in data.
+- For production environments that manage their own data, set `DISABLE_LEADERBOARD_AUTO_SEED=1`.
+
 ### Environment variables
 
 | Variable | Purpose |
@@ -296,6 +300,7 @@ Notes
 | `LEADERBOARD_API_KEY` | Default `X-API-Key` for the SDK |
 | `LEADERBOARD_JWT` | Optional bearer token for the SDK (`Authorization` header) |
 | `DISABLE_RATE_LIMIT` | Set to `1` to bypass in-process rate limits (dev only) |
+| `DISABLE_LEADERBOARD_AUTO_SEED` | Set to `1` to skip built-in dataset auto-seeding in production-managed data stores |
 | Per-route limits | e.g. `SUBMIT_MODEL_RATE_LIMIT=10/minute`, `IMPORT_DATASET_RATE_LIMIT=5/minute` |
 
 ---

@@ -108,7 +108,7 @@ Leaderboard/
 | Frontend | React 18, Create React App, Tailwind CSS |
 | State | Redux Toolkit + Redux Persist (cross-component), Zustand (local) |
 | Auth | Google OAuth 2.0 → HS256 JWT minted by Flask; or Bearer JWT via JWKS |
-| Tests | pytest (`backend/tests/` is the primary suite; 31 tests, all must pass) |
+| Tests | pytest (`backend/tests/` is the primary suite; 33 tests, all must pass) |
 | CI | `.github/workflows/ci.yml` — pytest + Ruff + frontend build |
 
 ---
@@ -251,6 +251,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 | `ALLOWED_ORIGINS` | Prod required | Comma-separated CORS origins |
 | `DB_HOST/USER/PASSWORD/NAME/PORT` | Optional | MySQL connection; SQLite is used when unset/unavailable |
 | `SQLITE_DB_PATH` | Optional | SQLite file path for zero-config persistence; default `./leaderboard.db` |
+| `DISABLE_LEADERBOARD_AUTO_SEED` | Optional | `1`/`true` to skip built-in demo/runnable dataset auto-seeding |
 | `OPENAI_API_KEY` | Optional | For OpenAI LLM evaluation in CSV benchmarks |
 | `ANTHROPIC_API_KEY` | Optional | For Anthropic LLM evaluation |
 | `GOOGLE_API_KEY` | Optional | For Gemini LLM evaluation |
@@ -273,6 +274,8 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 - **Dataset Details page** never 404s for demo cards (`ui_fallback_dataset_catalog.py`)
 - **All 5 evaluator classes** (TextClassification, NER, QA, Retrieval, Translation) in `eval_core/evaluators.py`
 - **`GET /public/dataset_questions`** — returns unlabeled inputs for submission pipeline
+- **Classification/NER submissions can omit `sentence_ids`** — the API auto-generates sequential IDs
+- **Stale seed repair** — startup ensures required runnable datasets like `SST-2 Sentiment (Sample)` exist even when older rows are already present
 - **Daily submission quota** via `DAILY_SUBMISSION_LIMIT` env var + `X-Submissions-Remaining` header
 - **`POST /public/run_hf_model`** — sync/async HF model evaluation (requires `transformers`)
 - **`/create-leaderboard` wizard** — import a HF dataset + optionally run a HF model
@@ -280,7 +283,7 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 - **`eval_core` lazy imports** — no numpy segfault on macOS
 - **Collapsible submission format block** in `SubmitToLeaderboard.js`
 - **Full metric breakdown per submission** in `MySubmissions.js`
-- **31 tests passing** in `backend/tests/`
+- **33 tests passing** in `backend/tests/`
 
 ### What is deferred / incomplete
 
@@ -295,7 +298,7 @@ See `TODO.md` for the full prioritized checklist. Top blockers:
 ## Conventions agents must follow
 
 ### Always
-1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 31 tests must pass.
+1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 33 tests must pass.
 2. **Run `npm run build` from `frontend/` before finishing.** Build must succeed (warnings OK, errors not).
 3. Keep the **SQLite default and in-memory `_STORE` fallback working** — never assume MySQL is available.
 4. Both `backend/tests/` and frontend build checks must stay green.
@@ -363,13 +366,10 @@ See `TODO.md` for the full prioritized checklist. Top blockers:
 | Google OAuth broken — `GOOGLE_CLIENT_SECRET` missing | `backend/.env` | High |
 | `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY` are placeholders | `backend/.env` | High |
 | `LEADERBOARD_ADMIN_API_KEYS` unset — seed route returns 503 | `backend/.env` | High |
-| `frontend/.env.development` points to `:5005` not `:5001` | `frontend/.env.development` | High |
 | Full UI submission flow needs manual QA | `SubmitToLeaderboard.js` + `MySubmissions.js` | Medium |
-| `docker-compose.yml` uses MySQL; SQLite is now the default | `docker-compose.yml` | Medium |
 | No frontend tests | — | Low |
 | `SubmitToLeaderboard.js` has ~20 unused state variables | `frontend/…/SubmitToLeaderboard.js` | Low |
 | Async eval job queue is stub only | `blueprints/submissions.py` + `blueprints/eval.py` | Low |
-| `/create-leaderboard` link not exposed in nav | `HeaderBar.js` | Low |
 
 ---
 

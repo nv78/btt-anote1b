@@ -30,16 +30,10 @@ def submit_model():
     model_results = data.get('modelResults')
     sentence_ids = data.get('sentence_ids')
 
-    if not all([isinstance(model_results, list), isinstance(sentence_ids, list)]):
+    if not isinstance(model_results, list):
         return jsonify({
             "success": False,
-            "error": "Missing required fields: benchmarkDatasetName, modelName, modelResults (list), sentence_ids (list)",
-        }), 400
-
-    if len(model_results) != len(sentence_ids):
-        return jsonify({
-            "success": False,
-            "error": "Length of sentence_ids must match length of modelResults",
+            "error": "Missing required fields: benchmarkDatasetName, modelName, modelResults (list)",
         }), 400
 
     submitter_id = resolve_submitter_id(request, data)
@@ -76,6 +70,41 @@ def submit_model():
 
     if not dataset:
         dataset = next((d for d in _STORE["datasets"] if d.get("name") == benchmark_dataset_name), None)
+
+    task_type_for_ids = (dataset or {}).get("task_type")
+    task_type_key = str(task_type_for_ids or "").lower()
+    reference_data_for_ids = None
+    if dataset:
+        try:
+            raw_reference_data = dataset.get("reference_data")
+            reference_data_for_ids = json.loads(raw_reference_data) if isinstance(raw_reference_data, str) else raw_reference_data
+        except Exception:
+            reference_data_for_ids = None
+    has_inline_reference_rows = isinstance(reference_data_for_ids, dict) and any(
+        isinstance(reference_data_for_ids.get(key), list)
+        for key in ("source_texts", "ground_truth", "reference_translations", "labels", "entities", "answers")
+    )
+    requires_explicit_ids = task_type_key in ("translation", "document_qa") and not has_inline_reference_rows
+    if sentence_ids is None:
+        if requires_explicit_ids:
+            return jsonify({
+                "success": False,
+                "error": "Missing required field: sentence_ids (list)",
+            }), 400
+        sentence_ids = list(range(len(model_results)))
+    elif not isinstance(sentence_ids, list):
+        return jsonify({
+            "success": False,
+            "error": "sentence_ids must be a list",
+        }), 400
+    elif task_type_key in ("text_classification", "named_entity_recognition", "ner"):
+        sentence_ids = list(range(len(model_results)))
+
+    if len(model_results) != len(sentence_ids):
+        return jsonify({
+            "success": False,
+            "error": "Length of sentence_ids must match length of modelResults",
+        }), 400
 
     task_type = None
     metric = None

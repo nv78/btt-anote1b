@@ -195,6 +195,8 @@ def _leaderboard_data_rows(dataset_filter: str | None, represented: set[tuple[st
                 "submission_id": synthetic_id,
                 "model_name": str(model_name),
                 "dataset_name": str(dataset_name),
+                "url": dataset.get("url"),
+                "submission_count": len(dataset.get("models") or []),
                 "task_type": dataset.get("task_type"),
                 "evaluation_metric": metric,
                 "score": float(model.get("score") or 0),
@@ -298,6 +300,9 @@ def get_leaderboard():
 
     def _rows_to_leaderboard(rows, r0):
         leaderboard = []
+        dataset_counts: dict[str, int] = defaultdict(int)
+        for row in rows:
+            dataset_counts[row["dataset_name"]] += 1
         for j, row in enumerate(rows):
             details = {}
             if row.get("evaluation_details"):
@@ -305,11 +310,19 @@ def get_leaderboard():
                     details = json.loads(row["evaluation_details"]) if isinstance(row["evaluation_details"], str) else row["evaluation_details"]
                 except Exception:
                     details = {}
+            reference_data = {}
+            if row.get("reference_data"):
+                try:
+                    reference_data = json.loads(row["reference_data"]) if isinstance(row["reference_data"], str) else row["reference_data"]
+                except Exception:
+                    reference_data = {}
             leaderboard.append({
                 "rank": r0 + j,
                 "submission_id": row.get("submission_id"),
                 "model_name": row["model_name"],
                 "dataset_name": row["dataset_name"],
+                "url": reference_data.get("url") if isinstance(reference_data, dict) else None,
+                "submission_count": dataset_counts[row["dataset_name"]],
                 "task_type": row.get("task_type"),
                 "evaluation_metric": row.get("evaluation_metric"),
                 "score": float(row["score"]),
@@ -330,7 +343,7 @@ def get_leaderboard():
                 params.append(dataset_filter)
 
             base_select = (
-                "SELECT ms.id AS submission_id, ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
+                "SELECT ms.id AS submission_id, ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, bd.reference_data, "
                 "er.score, er.evaluation_details, ms.created AS submitted_at, "
                 "ms.submitted_by, ms.model_results "
                 "FROM model_submissions ms "
@@ -393,6 +406,8 @@ def get_leaderboard():
             "submission_id": sub["id"],
             "model_name": sub["model_name"],
             "dataset_name": sub["benchmark_dataset_name"],
+            "url": ((ds_meta or {}).get("reference_data") or {}).get("url") if isinstance((ds_meta or {}).get("reference_data"), dict) else None,
+            "submission_count": sum(1 for _ev, _sub in mem_all if _sub["benchmark_dataset_name"] == sub["benchmark_dataset_name"]),
             "task_type": (ds_meta or {}).get("task_type") or "translation",
             "evaluation_metric": ev["metric"],
             "score": ev["score"],
@@ -1016,6 +1031,7 @@ def list_leaderboard_datasets():
 
 _AUTO_SEED_DONE = False
 _AUTO_SEED_LOCK = threading.Lock()
+_REQUIRED_SEED_DATASETS = {"SST-2 Sentiment (Sample)"}
 
 
 def _truthy_env(name: str, default: bool = False) -> bool:
@@ -1051,6 +1067,57 @@ def _leaderboard_has_any_rows() -> bool:
     return False
 
 
+def _ensure_required_datasets() -> dict[str, int]:
+    """Add required runnable seed datasets that may be missing from an older DB."""
+    try:
+        from scripts.seed_real_benchmarks import DATASETS  # type: ignore
+    except ImportError:
+        from backend.scripts.seed_real_benchmarks import DATASETS  # type: ignore
+
+    required = [d for d in DATASETS if d.get("name") in _REQUIRED_SEED_DATASETS]
+    added = 0
+    dataset_fn = _unwrapped_route(add_dataset)
+
+    for dataset in required:
+        name = dataset["name"]
+        exists = any(d.get("name") == name for d in _STORE.get("datasets", []))
+        if not exists:
+            conn, cursor = get_db_connection()
+            if conn and cursor:
+                try:
+                    cursor.execute("SELECT id FROM benchmark_datasets WHERE name = %s", (name,))
+                    exists = bool(cursor.fetchone())
+                except Exception as e:
+                    logger.warning("required_dataset_check_failed", extra={"dataset": name, "error": str(e)})
+                finally:
+                    try:
+                        cursor.close()
+                        conn.close()
+                    except Exception:
+                        pass
+
+        if exists:
+            continue
+
+        with current_app.test_request_context(
+            "/api/leaderboard/add_dataset",
+            method="POST",
+            json={
+                "name": name,
+                "task_type": dataset["task_type"],
+                "evaluation_metric": dataset["evaluation_metric"],
+                "url": dataset["url"],
+                "description": dataset.get("description", f"Seeded benchmark card for {name}."),
+                "source_texts": (dataset.get("reference_data") or {}).get("source_texts", []),
+                "ground_truth": (dataset.get("reference_data") or {}).get("ground_truth", []),
+            },
+        ):
+            dataset_fn()
+        added += 1
+
+    return {"required_datasets_added": added}
+
+
 @bp.before_request
 def _auto_seed_once() -> None:
     global _AUTO_SEED_DONE
@@ -1065,9 +1132,12 @@ def _auto_seed_once() -> None:
         if _AUTO_SEED_DONE:
             return
         _AUTO_SEED_DONE = True
-        if _leaderboard_has_any_rows():
-            return
         try:
+            if _leaderboard_has_any_rows():
+                summary = _ensure_required_datasets()
+                if summary.get("required_datasets_added"):
+                    logger.info("leaderboard_required_datasets_seeded", extra=summary)
+                return
             summary = _seed_builtin_leaderboard_data()
             logger.info("leaderboard_auto_seeded", extra=summary)
         except Exception as e:

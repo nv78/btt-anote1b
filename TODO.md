@@ -23,6 +23,8 @@ Last updated: May 2026. Check off items as they are completed.
 - [x] **`docker-compose.yml` uses MySQL but SQLite is now default** — fixed by removing MySQL and mounting `leaderboard_data` at `/data` with `SQLITE_DB_PATH=/data/leaderboard.db`. File: `docker-compose.yml`.
 - [x] **SQLite DB is gitignored** — `leaderboard.db` is in `.gitignore`, correct.
 - [x] **Auto-seed on empty DB** — verified working; `before_request` hook in `app.py` seeds 25 entries on first request.
+- [x] **Stale seed repair for required datasets** — `_ensure_required_datasets()` adds `SST-2 Sentiment (Sample)` on startup even when older leaderboard rows already exist. File: `blueprints/leaderboard.py`.
+- [x] **Document stale local SQLite reset** — `README.md` explains deleting `backend/leaderboard.db` and restarting when new seed datasets do not appear.
 - [ ] **`_STORE` (RAM) still used as fallback** — submissions and evaluations that fail the DB write fall into `_STORE["submissions"]` / `_STORE["evaluations"]` and are lost on restart. Long-term: ensure all writes succeed to SQLite. File: `shared.py`.
 
 ---
@@ -31,6 +33,7 @@ Last updated: May 2026. Check off items as they are completed.
 
 - [x] **API-level full flow is covered for the runnable sample** — `test_submission_e2e.py` verifies `GET /public/dataset_questions`, all-positive submission scoring, and perfect submission scoring for `SST-2 Sentiment (Sample)`.
 - [x] **Auto-seed includes a dataset with `reference_data.ground_truth`** — `SST-2 Sentiment (Sample)` provides 20 unlabeled questions plus hidden labels; the 10 curated score-only demo cards remain curated-only. File: `scripts/seed_real_benchmarks.py`.
+- [x] **Classification submissions can omit `sentence_ids`** — `POST /public/submit_model` auto-generates sequential IDs for text classification / NER and has e2e coverage. File: `blueprints/submissions.py`.
 - [ ] **Submission format block in SubmitToLeaderboard.js** — the collapsible format block calls `GET /public/submission_format?dataset=<name>`. Verify it renders correctly for each task type (text_classification, NER, QA, retrieval, translation). File: `frontend/src/landing_page/landing_page_components/SubmitToLeaderboard.js`.
 - [x] **Daily quota display** — `MySubmissions.js` calls `GET /public/submission_quota` and shows a "X of 5 daily submissions used" counter when `leaderboard_submitter_id` is set.
 - [ ] **`eval_core/leaderboard_bridge.py` uses placeholder results for submission format** — lines 217–242 return `<predicted_label>` / `ENTITY_ONE; ENTITY_TWO` etc. as example predictions. This is intentional for the format endpoint but should be clearly documented so it isn't confused with a real evaluation. File: `backend/eval_core/leaderboard_bridge.py:217`.
@@ -49,6 +52,7 @@ Last updated: May 2026. Check off items as they are completed.
 ## 🟡 Frontend Polish
 
 - [ ] **Demo chip renders correctly** — when API is down or empty, each leaderboard card should show a grey "Demo" badge. Start the frontend with the backend stopped and verify the banner + chips appear. File: `Leaderboard.js`.
+- [x] **Leaderboard card polish pass** — cards now show task badges, source links, submission counts, hover borders, and an empty-success CTA. File: `Leaderboard.js`.
 - [ ] **`TaskAdvancedMetricsPanel` — verify grouped layout** — open a dataset card, click "Advanced metrics", confirm categories (Core / Precision-Recall / Semantic overlap / Ranking / Translation) are grouped with collapse/expand. Metrics with no model scores should show "—" not blank.
 - [ ] **`DatasetDetails.js` — verify Details page works for all 10 demo datasets** — click "Details" on each leaderboard card. Should not 404. Backed by `ui_fallback_dataset_catalog.py`.
 - [x] **`/create-leaderboard` link not exposed in nav** — added a small outlined "＋ New Leaderboard" nav link in `HeaderBar.js`.
@@ -72,7 +76,7 @@ Last updated: May 2026. Check off items as they are completed.
   - `ALLOWED_ORIGINS`
   - `LEADERBOARD_FRONTEND_URL`
   - `LEADERBOARD_OAUTH_PUBLIC_BASE_URL`
-  - `DISABLE_AUTO_SEED=1` (use the seed route manually instead)
+  - `DISABLE_LEADERBOARD_AUTO_SEED=1` (use the seed route manually instead)
 
 ---
 

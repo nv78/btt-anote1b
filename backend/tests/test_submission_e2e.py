@@ -109,3 +109,60 @@ def test_seeded_sst2_submission_scores_all_positive_and_perfect(monkeypatch):
         assert perfect_body["success"] is True
         assert perfect_body["score"] == pytest.approx(1.0)
         assert perfect_body["detailed_scores"]["accuracy"] == pytest.approx(1.0)
+
+
+def test_seeded_sst2_classification_submission_allows_missing_sentence_ids(monkeypatch):
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setenv("LEADERBOARD_AUTO_SEED_IN_TESTS", "1")
+    monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
+    reset_store()
+
+    with app.test_client() as c:
+        c.get("/health")
+        response = c.post("/public/submit_model", json={
+            "benchmarkDatasetName": DATASET_NAME,
+            "modelName": "perfect-no-sentence-ids",
+            "modelResults": [str(label) for label in GROUND_TRUTH],
+            "submitterId": "sst2-no-sentence-ids",
+        })
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["success"] is True
+        assert body["score"] == pytest.approx(1.0)
+        assert body["detailed_scores"]["accuracy"] == pytest.approx(1.0)
+
+
+def test_stale_seed_store_gets_required_sst2_dataset(monkeypatch):
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setenv("LEADERBOARD_AUTO_SEED_IN_TESTS", "1")
+    monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
+    reset_store()
+    app_module._STORE["datasets"].append({
+        "name": "old_seed_only",
+        "task_type": "text_classification",
+        "evaluation_metric": "accuracy",
+        "reference_data": {"source_texts": ["old"], "ground_truth": [1]},
+    })
+    app_module._STORE["submissions"].append({
+        "id": 1,
+        "benchmark_dataset_name": "old_seed_only",
+        "model_name": "old-model",
+        "submitted_by": "seed",
+        "submitter_id": "seed",
+        "results": ["1"],
+        "created": app_module.utc_now(),
+    })
+    app_module._STORE["evaluations"].append({
+        "submission_id": 1,
+        "score": 1.0,
+        "metric": "accuracy",
+        "evaluation_details": {"metric": "accuracy", "detailed_scores": {"accuracy": 1.0}},
+        "created": app_module.utc_now(),
+    })
+
+    with app.test_client() as c:
+        datasets = c.get("/public/datasets")
+        assert datasets.status_code == 200
+        dataset_names = {row["name"] for row in datasets.get_json()["datasets"]}
+        assert "old_seed_only" in dataset_names
+        assert DATASET_NAME in dataset_names
