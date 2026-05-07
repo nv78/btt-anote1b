@@ -18,6 +18,7 @@ const MySubmissions = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [expandedRows, setExpandedRows] = useState({});
+  const [quota, setQuota] = useState(null);
 
   useEffect(() => {
     localStorage.setItem("leaderboard_api_key", apiKey);
@@ -25,6 +26,44 @@ const MySubmissions = () => {
   useEffect(() => {
     localStorage.setItem("leaderboard_submitter_id", submitterId);
   }, [submitterId]);
+
+  const estimateQuotaFromRows = (submissionRows) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return (submissionRows || []).filter((row) => (row.submitted_at || "").slice(0, 10) === today).length;
+  };
+
+  const loadQuota = async (submissionRows = rows) => {
+    const trimmedSubmitterId = submitterId.trim();
+    if (!trimmedSubmitterId) {
+      setQuota(null);
+      return;
+    }
+
+    try {
+      const qs = new URLSearchParams({ submitter_id: trimmedSubmitterId });
+      const res = await fetch(`${API_BASE}/public/submission_quota?${qs}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to load quota");
+      }
+      const dailyLimit = Number(data.daily_limit ?? 5);
+      const usedToday = Number(data.used_today ?? Math.max(0, dailyLimit - Number(data.remaining ?? dailyLimit)));
+      const remaining = Number(data.remaining ?? Math.max(0, dailyLimit - usedToday));
+      setQuota({
+        daily_limit: dailyLimit,
+        used_today: usedToday,
+        remaining,
+      });
+    } catch (_) {
+      const dailyLimit = 5;
+      const usedToday = Math.min(dailyLimit, estimateQuotaFromRows(submissionRows));
+      setQuota({
+        daily_limit: dailyLimit,
+        used_today: usedToday,
+        remaining: Math.max(0, dailyLimit - usedToday),
+      });
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -35,6 +74,7 @@ const MySubmissions = () => {
       if (!submitterId.trim() && !jwt) {
         setRows([]);
         setTotal(0);
+        setQuota(null);
         setError("Set a submitter id (same as on Submit page) or sign in so the API receives your JWT.");
         setLoading(false);
         return;
@@ -49,12 +89,17 @@ const MySubmissions = () => {
       if (!res.ok || data.success !== true) {
         throw new Error(data.error || "Failed to load");
       }
-      setRows(data.submissions || []);
+      const submissionRows = data.submissions || [];
+      setRows(submissionRows);
       setTotal(data.total || 0);
       setNextCursor(data.next_cursor || null);
+      await loadQuota(submissionRows);
     } catch (e) {
       setError(e.message || "Error");
       setRows([]);
+      if (submitterId.trim()) {
+        await loadQuota([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -100,6 +145,10 @@ const MySubmissions = () => {
     return value >= 0 && value <= 1 ? value.toFixed(4) : value.toFixed(2);
   };
 
+  const quotaLimit = quota?.daily_limit || 5;
+  const quotaUsed = quota ? Math.min(quotaLimit, Math.max(0, quota.used_today || 0)) : 0;
+  const quotaPercent = quotaLimit > 0 ? Math.min(100, (quotaUsed / quotaLimit) * 100) : 0;
+
   return (
     <div className="min-h-screen bg-[#111827] text-gray-100 py-10 px-4">
       <div className="max-w-4xl mx-auto">
@@ -140,6 +189,23 @@ const MySubmissions = () => {
         >
           Refresh
         </button>
+        {submitterId.trim() && quota && (
+          <div className="mb-6 rounded-lg border border-gray-800 bg-[#0d1421] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="font-semibold text-white">
+                {quotaUsed} of {quotaLimit} daily submissions used
+              </span>
+              <span className="text-gray-400">{Math.max(0, quota.remaining || 0)} remaining</span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-800">
+              <div
+                className="h-full rounded-full bg-[#defe47]"
+                style={{ width: `${quotaPercent}%` }}
+                aria-hidden="true"
+              />
+            </div>
+          </div>
+        )}
         {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
         {loading ? (
           <div className="text-gray-400">Loading…</div>

@@ -67,6 +67,7 @@ def index():
             "/public/submit_model",
             "/public/eval_jobs/<job_id>",
             "/public/my_submissions",
+            "/public/submission_quota",
             "/public/submissions/<id>",
             "/public/get_leaderboard",
             "/public/export/leaderboard",
@@ -146,6 +147,12 @@ def openapi_spec():
                 }
             },
             "/public/eval_jobs/{job_id}": {"get": {"summary": "Poll async submit job status"}},
+            "/public/submission_quota": {
+                "get": {
+                    "summary": "Return today's submission quota usage",
+                    "parameters": [{"name": "submitter_id", "in": "query", "schema": {"type": "string"}}],
+                }
+            },
             "/public/my_submissions": {
                 "get": {
                     "summary": "List submissions for JWT sub or submitter_id query",

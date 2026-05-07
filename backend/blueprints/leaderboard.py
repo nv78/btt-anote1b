@@ -783,12 +783,15 @@ def add_dataset():
     }
     LEADERBOARD_DATA[:] = [ds for ds in LEADERBOARD_DATA if ds.get("name") != name]
     LEADERBOARD_DATA.append(new_ds)
-    reference_data = {
-        "url": data.get("url"),
-        "description": data.get("description"),
-        "source_texts": data.get("source_texts", []),
-        "ground_truth": data.get("ground_truth", []),
-    }
+    reference_data = {}
+    if data.get("url"):
+        reference_data["url"] = data.get("url")
+    if data.get("description"):
+        reference_data["description"] = data.get("description")
+    if data.get("source_texts"):
+        reference_data["source_texts"] = data.get("source_texts")
+    if data.get("ground_truth"):
+        reference_data["ground_truth"] = data.get("ground_truth")
     existing = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
     if existing:
         existing.update({"task_type": task_type, "evaluation_metric": evaluation_metric, "reference_data": reference_data})

@@ -51,6 +51,11 @@ def test_seeded_sst2_questions_do_not_expose_labels(monkeypatch):
     reset_store()
 
     with app.test_client() as c:
+        datasets = c.get("/public/datasets")
+        assert datasets.status_code == 200
+        dataset_names = {row["name"] for row in datasets.get_json()["datasets"]}
+        assert DATASET_NAME in dataset_names
+
         r = c.get("/public/dataset_questions", query_string={"dataset": DATASET_NAME})
         assert r.status_code == 200
         data = r.get_json()

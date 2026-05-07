@@ -108,7 +108,7 @@ Leaderboard/
 | Frontend | React 18, Create React App, Tailwind CSS |
 | State | Redux Toolkit + Redux Persist (cross-component), Zustand (local) |
 | Auth | Google OAuth 2.0 → HS256 JWT minted by Flask; or Bearer JWT via JWKS |
-| Tests | pytest (`backend/tests/` is the primary suite; 29 tests, all must pass) |
+| Tests | pytest (`backend/tests/` is the primary suite; 31 tests, all must pass) |
 | CI | `.github/workflows/ci.yml` — pytest + Ruff + frontend build |
 
 ---
@@ -147,6 +147,7 @@ GET  /public/dataset_questions          Dataset inputs/questions without labels 
 POST /public/submit_model               Submit model predictions → evaluates → ranks
 GET  /public/get_leaderboard            Ranked results (keyset pagination + dataset filter)
 GET  /public/my_submissions             Caller's past submissions (JWT or submitter_id)
+GET  /public/submission_quota           Daily quota usage for submitter_id or caller IP
 GET  /public/submissions/<id>           Single submission detail
 GET  /public/export/leaderboard         CSV or JSON dump of leaderboard
 GET  /public/submission_format          Template for a dataset's submission format
@@ -279,23 +280,22 @@ All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (g
 - **`eval_core` lazy imports** — no numpy segfault on macOS
 - **Collapsible submission format block** in `SubmitToLeaderboard.js`
 - **Full metric breakdown per submission** in `MySubmissions.js`
-- **29 tests passing** in `backend/tests/`
+- **31 tests passing** in `backend/tests/`
 
 ### What is deferred / incomplete
 
 See `TODO.md` for the full prioritized checklist. Top blockers:
 
 - **Auth secrets missing** — `GOOGLE_CLIENT_SECRET`, `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY`, `LEADERBOARD_ADMIN_API_KEYS` all unset in `backend/.env`
-- **`frontend/.env.development` wrong port** — points at `:5005`, should be `:5001`
 - **Manual browser submission flow still needs QA** — API-level e2e tests cover the runnable `SST-2 Sentiment (Sample)` dataset, but the full UI click path still needs manual verification
-- **`docker-compose.yml` uses MySQL** but SQLite is now the default
+- **`_STORE` fallback remains volatile** — submissions/evaluations that cannot write to SQLite are kept in RAM and lost on restart
 
 ---
 
 ## Conventions agents must follow
 
 ### Always
-1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 29 tests must pass.
+1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 31 tests must pass.
 2. **Run `npm run build` from `frontend/` before finishing.** Build must succeed (warnings OK, errors not).
 3. Keep the **SQLite default and in-memory `_STORE` fallback working** — never assume MySQL is available.
 4. Both `backend/tests/` and frontend build checks must stay green.

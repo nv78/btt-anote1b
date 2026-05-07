@@ -319,6 +319,23 @@ def eval_job_status(job_id):
     return jsonify({"success": True, **row})
 
 
+@bp.get("/public/submission_quota")
+def submission_quota():
+    """Return today's submission quota usage for a submitter id or caller IP."""
+    submitter_id = (request.args.get("submitter_id") or "").strip()
+    quota_submitter_id = submitter_id or request.remote_addr or "anonymous"
+    limit = daily_submission_limit()
+    day = utc_now().date().isoformat()
+    key = f"{quota_submitter_id}:{day}"
+    used_today = int(_STORE.setdefault("submission_counts", {}).get(key, 0))
+    remaining = max(0, limit - used_today)
+    return jsonify({
+        "daily_limit": limit,
+        "used_today": used_today,
+        "remaining": remaining,
+    })
+
+
 @bp.get("/public/my_submissions")
 def my_submissions():
     """List submissions for a submitter (JWT ``sub`` or ``submitter_id`` query with API key).

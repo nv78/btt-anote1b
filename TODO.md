@@ -6,6 +6,7 @@ Last updated: May 2026. Check off items as they are completed.
 
 ## 🔴 Auth & Security (blocking for production)
 
+- [x] **Document required first-run secrets** — `backend/.env.example` now lists generation commands for JWT/Flask secrets, OAuth credentials, admin keys, and write keys.
 - [ ] **Set `GOOGLE_CLIENT_SECRET`** — currently missing from `backend/.env`. Get from Google Cloud Console → APIs & Services → Credentials → your OAuth 2.0 Web client. Without this the token exchange in `blueprints/auth.py` will fail with a 400 from Google.
 - [ ] **Set `LEADERBOARD_JWT_SECRET`** — currently a placeholder. Generate with `openssl rand -hex 32` and add to `backend/.env`. Used to sign session JWTs after OAuth.
 - [ ] **Set `FLASK_SECRET_KEY`** — currently unset (Flask uses a weak default). Required for session security. Add to `backend/.env`.
@@ -31,7 +32,7 @@ Last updated: May 2026. Check off items as they are completed.
 - [x] **API-level full flow is covered for the runnable sample** — `test_submission_e2e.py` verifies `GET /public/dataset_questions`, all-positive submission scoring, and perfect submission scoring for `SST-2 Sentiment (Sample)`.
 - [x] **Auto-seed includes a dataset with `reference_data.ground_truth`** — `SST-2 Sentiment (Sample)` provides 20 unlabeled questions plus hidden labels; the 10 curated score-only demo cards remain curated-only. File: `scripts/seed_real_benchmarks.py`.
 - [ ] **Submission format block in SubmitToLeaderboard.js** — the collapsible format block calls `GET /public/submission_format?dataset=<name>`. Verify it renders correctly for each task type (text_classification, NER, QA, retrieval, translation). File: `frontend/src/landing_page/landing_page_components/SubmitToLeaderboard.js`.
-- [ ] **Daily quota display** — `POST /public/submit_model` returns `X-Submissions-Remaining` header but `MySubmissions.js` doesn't show the user how many submissions they have left today. Add a "X of 5 daily submissions used" indicator. File: `frontend/src/landing_page/landing_page_components/MySubmissions.js`.
+- [x] **Daily quota display** — `MySubmissions.js` calls `GET /public/submission_quota` and shows a "X of 5 daily submissions used" counter when `leaderboard_submitter_id` is set.
 - [ ] **`eval_core/leaderboard_bridge.py` uses placeholder results for submission format** — lines 217–242 return `<predicted_label>` / `ENTITY_ONE; ENTITY_TWO` etc. as example predictions. This is intentional for the format endpoint but should be clearly documented so it isn't confused with a real evaluation. File: `backend/eval_core/leaderboard_bridge.py:217`.
 
 ---

@@ -63,9 +63,20 @@ def test_submit_model_daily_quota(monkeypatch):
     }
 
     with app.test_client() as c:
+        quota_before = c.get("/public/submission_quota?submitter_id=quota-user")
+        assert quota_before.status_code == 200
+        assert quota_before.get_json()["daily_limit"] == 2
+        assert quota_before.get_json()["used_today"] == 0
+        assert quota_before.get_json()["remaining"] == 2
+
         r1 = c.post("/public/submit_model", json=payload)
         assert r1.status_code == 200
         assert r1.headers["X-Submissions-Remaining"] == "1"
+
+        quota_after_one = c.get("/public/submission_quota?submitter_id=quota-user")
+        assert quota_after_one.status_code == 200
+        assert quota_after_one.get_json()["used_today"] == 1
+        assert quota_after_one.get_json()["remaining"] == 1
 
         r2 = c.post("/public/submit_model", json=payload)
         assert r2.status_code == 200

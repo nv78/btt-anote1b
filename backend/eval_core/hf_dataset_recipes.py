@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from datasets import load_dataset
-
 GLUE_HF_ID = "nyu-mll/glue"
 GLUE_SST2_CONFIG = "sst2"
 
@@ -14,6 +12,12 @@ SQUAD_HF_ID = "squad"
 CONLL_HF_ID = "conll2003"
 
 SST2_ID_LABEL = {0: "negative", 1: "positive"}
+
+
+def _load_dataset(*args, **kwargs):
+    from datasets import load_dataset
+
+    return load_dataset(*args, **kwargs)
 
 
 def sst2_row_to_ground_truth_item(
@@ -70,7 +74,7 @@ def load_glue_sst2_ground_truth(
     Raises:
         ValueError: unlabeled / invalid labels (e.g. test split with -1).
     """
-    ds = load_dataset(GLUE_HF_ID, GLUE_SST2_CONFIG, split=split)
+    ds = _load_dataset(GLUE_HF_ID, GLUE_SST2_CONFIG, split=split)
     n = len(ds)
     if limit is not None:
         n = min(n, limit)
@@ -165,9 +169,9 @@ def load_squad_ground_truth(
     limit: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     try:
-        ds = load_dataset(SQUAD_HF_ID, split=split)
+        ds = _load_dataset(SQUAD_HF_ID, split=split)
     except Exception:
-        ds = load_dataset("rajpurkar/squad", split=split)
+        ds = _load_dataset("rajpurkar/squad", split=split)
     n = len(ds)
     if limit is not None:
         n = min(n, limit)
@@ -230,7 +234,7 @@ def load_conll2003_ground_truth(
     split: str,
     limit: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    ds = load_dataset(CONLL_HF_ID, split=split, trust_remote_code=True)
+    ds = _load_dataset(CONLL_HF_ID, split=split, trust_remote_code=True)
     ner_feature = ds.features["ner_tags"]
     tag_names = list(ner_feature.feature.names)
     n = len(ds)
