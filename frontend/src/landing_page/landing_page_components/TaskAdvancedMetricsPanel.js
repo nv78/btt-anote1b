@@ -134,7 +134,7 @@ export default function TaskAdvancedMetricsPanel({ apiBase, taskType, models, cl
   }
 
   return (
-    <div className={`border-t border-gray-800/40 bg-black/25 px-3 py-3 ${className}`.trim()}>
+    <div className={`border-t border-gray-800/40 bg-black/25 px-3 py-3 min-w-0 ${className}`.trim()}>
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2 px-1">
         <div className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide inline-flex items-center gap-1.5">
           Advanced metrics for this task
@@ -151,8 +151,8 @@ export default function TaskAdvancedMetricsPanel({ apiBase, taskType, models, cl
           </div>
         )}
       </div>
-      <div className="overflow-x-auto rounded-lg border border-gray-800/60">
-        <table className="w-full text-left text-[11px] min-w-[44rem]">
+      <div className="overflow-x-auto w-full rounded-lg border border-gray-800/60">
+        <table className="text-left text-[11px] min-w-[44rem] w-full">
           <thead>
             <tr className="bg-[#0a101a] text-[10px] uppercase tracking-wider text-gray-500">
               <th className="py-2 pl-2 pr-2 align-bottom sticky left-0 bg-[#0a101a] z-[1]">Metric</th>
