@@ -29,6 +29,7 @@ def submit_model():
         return jsonify({"success": False, "error": str(e)}), 400
     model_results = data.get('modelResults')
     sentence_ids = data.get('sentence_ids')
+    is_public = 0 if str(data.get("is_public", True)).lower() in ("false", "0", "no", "private") else 1
 
     if not isinstance(model_results, list):
         return jsonify({
@@ -250,12 +251,25 @@ def submit_model():
 
                 try:
                     cursor.execute(
-                        "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, submitter_id, model_results) "
-                        "VALUES (%s, %s, %s, %s, %s)",
-                        (dataset_id, model_name, submitted_by, submitter_id, json.dumps(model_results)),
+                        "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, submitter_id, model_results, is_public) "
+                        "VALUES (%s, %s, %s, %s, %s, %s)",
+                        (dataset_id, model_name, submitted_by, submitter_id, json.dumps(model_results), is_public),
                     )
                 except Exception as ins_err:
-                    if "submitter_id" in str(ins_err).lower() or "Unknown column" in str(ins_err):
+                    err_s = str(ins_err).lower()
+                    if "is_public" in err_s or ("no column" in err_s and "is_public" in err_s):
+                        # DB predates is_public column — migrate then retry
+                        try:
+                            cursor.execute("ALTER TABLE model_submissions ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1")
+                            conn.commit()
+                        except Exception:
+                            pass
+                        cursor.execute(
+                            "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, submitter_id, model_results, is_public) "
+                            "VALUES (%s, %s, %s, %s, %s, %s)",
+                            (dataset_id, model_name, submitted_by, submitter_id, json.dumps(model_results), is_public),
+                        )
+                    elif "submitter_id" in err_s or "unknown column" in err_s:
                         cursor.execute(
                             "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results) "
                             "VALUES (%s, %s, %s, %s)",
@@ -293,6 +307,7 @@ def submit_model():
                 "submitter_id": submitter_id,
                 "metadata": metadata,
                 "results": model_results,
+                "is_public": is_public,
                 "created": utc_now(),
             })
             _STORE["evaluations"].append({
@@ -313,6 +328,7 @@ def submit_model():
             "score": float(score),
             "metric": metric,
             "detailed_scores": detailed_scores,
+            "is_public": bool(is_public),
         }
 
     if want_async:
@@ -438,7 +454,7 @@ def my_submissions():
             try:
                 if use_cursor:
                     cursor.execute(
-                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, "
+                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, ms.is_public, "
                         "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
                         "FROM model_submissions ms "
                         "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
@@ -449,7 +465,7 @@ def my_submissions():
                     )
                 else:
                     cursor.execute(
-                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, "
+                        "SELECT ms.id, ms.model_name, ms.submitted_by, ms.submitter_id, ms.created, ms.is_public, "
                         "bd.name AS dataset_name, bd.task_type, er.score, er.evaluation_details "
                         "FROM model_submissions ms "
                         "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
@@ -500,6 +516,7 @@ def my_submissions():
                     "primary_metric": det.get("metric") if isinstance(det, dict) else None,
                     "detailed_scores": det.get("detailed_scores") if isinstance(det, dict) else None,
                     "submitted_at": r["created"].isoformat() if r.get("created") else None,
+                    "is_public": bool(r.get("is_public", 1)),
                 })
             out = {
                 "success": True,
@@ -691,3 +708,127 @@ def submission_detail(submission_id: int):
             "submitted_at": sub_row["created"].isoformat(),
         },
     })
+
+
+def _require_submission_owner(request, submission_id: int):
+    """Return (sub, error_response) — sub is the authenticated identity, error_response is None on success."""
+    sub = jwt_sub_from_request(request)
+    if not sub:
+        configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
+        supplied = request.headers.get("X-API-Key", "").strip()
+        if configured and supplied in configured:
+            sub = (request.args.get("submitter_id") or "").strip()
+    if not sub:
+        return None, (jsonify({"success": False, "error": "Unauthorized"}), 401)
+    return sub, None
+
+
+@bp.delete("/public/submissions/<int:submission_id>")
+def delete_submission(submission_id: int):
+    """Delete a submission (owner only)."""
+    sub, err = _require_submission_owner(request, submission_id)
+    if err:
+        return err
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT ms.id, ms.submitter_id, ms.submitted_by FROM model_submissions ms WHERE ms.id = %s",
+                (submission_id,),
+            )
+            r = cursor.fetchone()
+            if not r:
+                return jsonify({"success": False, "error": "Not found"}), 404
+            owner = r.get("submitter_id") or r.get("submitted_by") or ""
+            if owner != sub:
+                return jsonify({"success": False, "error": "Forbidden"}), 403
+            cursor.execute("DELETE FROM evaluation_results WHERE model_submission_id = %s", (submission_id,))
+            cursor.execute("DELETE FROM model_submissions WHERE id = %s", (submission_id,))
+            conn.commit()
+            return jsonify({"success": True, "deleted": submission_id})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    # In-memory fallback
+    idx = next((i for i, s in enumerate(_STORE["submissions"]) if s["id"] == submission_id), None)
+    if idx is None:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    owner = _STORE["submissions"][idx].get("submitter_id") or _STORE["submissions"][idx].get("submitted_by")
+    if owner != sub:
+        return jsonify({"success": False, "error": "Forbidden"}), 403
+    _STORE["submissions"].pop(idx)
+    _STORE["evaluations"] = [e for e in _STORE["evaluations"] if e["submission_id"] != submission_id]
+    return jsonify({"success": True, "deleted": submission_id})
+
+
+@bp.patch("/public/submissions/<int:submission_id>/visibility")
+def update_submission_visibility(submission_id: int):
+    """Toggle a submission between public and private (owner only).
+
+    Body: {"is_public": true|false}
+    """
+    sub, err = _require_submission_owner(request, submission_id)
+    if err:
+        return err
+
+    body = request.get_json(silent=True) or {}
+    raw = body.get("is_public")
+    if raw is None:
+        return jsonify({"success": False, "error": "Missing is_public field"}), 400
+    is_public = 0 if str(raw).lower() in ("false", "0", "no", "private") else 1
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT ms.id, ms.submitter_id, ms.submitted_by FROM model_submissions ms WHERE ms.id = %s",
+                (submission_id,),
+            )
+            r = cursor.fetchone()
+            if not r:
+                return jsonify({"success": False, "error": "Not found"}), 404
+            owner = r.get("submitter_id") or r.get("submitted_by") or ""
+            if owner != sub:
+                return jsonify({"success": False, "error": "Forbidden"}), 403
+            try:
+                cursor.execute(
+                    "UPDATE model_submissions SET is_public = %s WHERE id = %s",
+                    (is_public, submission_id),
+                )
+            except Exception as upd_err:
+                if "is_public" in str(upd_err).lower() or "no column" in str(upd_err).lower():
+                    cursor.execute("ALTER TABLE model_submissions ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1")
+                    conn.commit()
+                    cursor.execute(
+                        "UPDATE model_submissions SET is_public = %s WHERE id = %s",
+                        (is_public, submission_id),
+                    )
+                else:
+                    raise
+            conn.commit()
+            return jsonify({"success": True, "submission_id": submission_id, "is_public": bool(is_public)})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    # In-memory fallback
+    sub_row = next((s for s in _STORE["submissions"] if s["id"] == submission_id), None)
+    if not sub_row:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    owner = sub_row.get("submitter_id") or sub_row.get("submitted_by")
+    if owner != sub:
+        return jsonify({"success": False, "error": "Forbidden"}), 403
+    sub_row["is_public"] = is_public
+    return jsonify({"success": True, "submission_id": submission_id, "is_public": bool(is_public)})

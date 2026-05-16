@@ -73,6 +73,7 @@ const SubmitToLeaderboard = ({
   const [dsSearch, setDsSearch] = useState("");
   const [submitMode, setSubmitMode] = useState("manual"); // 'manual' | 'csv' | 'json'
   const [copiedQuestions, setCopiedQuestions] = useState(""); // '' | 'text' | 'json'
+  const [isPublic, setIsPublic] = useState(true);
 
   useEffect(() => {
     localStorage.setItem("leaderboard_api_key", apiKey);
@@ -187,6 +188,7 @@ const SubmitToLeaderboard = ({
         modelName: modelNameInput.trim(),
         modelResults: translations,
         sentence_ids: sentenceIds,
+        is_public: isPublic,
       };
       if (submitterId.trim()) payload.submitterId = submitterId.trim();
       const res = await fetch(`${API_BASE}/public/submit_model`, {
@@ -995,16 +997,40 @@ const SubmitToLeaderboard = ({
             <h2 className="text-base font-semibold text-white">Submit Your Answers</h2>
           </div>
 
-          {/* Model name */}
-          <div className="mb-4">
-            <label className="block text-sm text-gray-400 mb-1.5">Model name</label>
-            <input
-              type="text"
-              placeholder="e.g. my-model-v2"
-              value={modelNameInput}
-              onChange={(e) => setModelNameInput(e.target.value)}
-              className="w-full sm:w-72 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50"
-            />
+          {/* Model name + visibility */}
+          <div className="mb-4 flex flex-wrap items-end gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1.5">Model name</label>
+              <input
+                type="text"
+                placeholder="e.g. my-model-v2"
+                value={modelNameInput}
+                onChange={(e) => setModelNameInput(e.target.value)}
+                className="w-full sm:w-72 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1.5">Visibility</label>
+              <div className="flex rounded-lg overflow-hidden border border-gray-700 w-fit">
+                <button
+                  type="button"
+                  onClick={() => setIsPublic(true)}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${isPublic ? "bg-green-700 text-white" : "bg-gray-900 text-gray-400 hover:text-white"}`}
+                >
+                  Public
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPublic(false)}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${!isPublic ? "bg-gray-600 text-white" : "bg-gray-900 text-gray-400 hover:text-white"}`}
+                >
+                  Private
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {isPublic ? "Appears on the public leaderboard." : "Only visible in My Submissions."}
+              </p>
+            </div>
           </div>
 
           {/* Mode tabs */}

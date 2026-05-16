@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS model_submissions (
     submitted_by TEXT NOT NULL,
     submitter_id TEXT,
     model_results TEXT NOT NULL,
+    is_public INTEGER NOT NULL DEFAULT 1,
     created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (benchmark_dataset_id) REFERENCES benchmark_datasets(id)
         ON DELETE CASCADE

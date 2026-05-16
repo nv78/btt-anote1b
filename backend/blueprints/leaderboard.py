@@ -336,7 +336,7 @@ def get_leaderboard():
 
     if conn and cursor:
         try:
-            where = "WHERE bd.active = TRUE"
+            where = "WHERE bd.active = TRUE AND (ms.is_public IS NULL OR ms.is_public = 1)"
             params = []
             if dataset_filter:
                 where += " AND bd.name = %s"
