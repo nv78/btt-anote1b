@@ -24,15 +24,20 @@ const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_END
 // ── Sample JSON return format component ──────────────────────────────────────
 
 const SAMPLE_OUTPUTS = {
-  text_classification:    ["positive", "negative", "positive"],
-  named_entity_recognition: ["Barack Obama; United States", "Apple Inc.; Cupertino", ""],
-  document_qa:            ["1955", "Evelyn Lincoln", "the Oval Office"],
-  line_qa:                ["Paris", "H2O", "photosynthesis"],
-  multiple_choice_qa:     ["A", "C", "B"],
-  natural_language_inference: ["entailment", "contradiction", "neutral"],
-  math_reasoning:         ["42", "17.5", "100"],
-  summarization:          ["Scientists discover water on Mars.", "Stock markets fall sharply.", "New study links diet to longevity."],
-  translation:            ["Bonjour le monde", "Gracias por su ayuda", "Wie geht es Ihnen"],
+  text_classification:        ["positive", "negative", "positive"],
+  named_entity_recognition:   ["Barack Obama; United States", "Apple Inc.; Cupertino", ""],
+  document_qa:                ["1955", "Evelyn Lincoln", "the Oval Office"],
+  line_qa:                    ["Paris", "H2O", "photosynthesis"],
+  multiple_choice_qa:         ["A", "C", "B"],
+  natural_language_inference:  ["entailment", "contradiction", "neutral"],
+  math_reasoning:             ["42", "17.5", "100"],
+  summarization:              ["Scientists discover water on Mars.", "Stock markets fall sharply.", "New study links diet to longevity."],
+  translation:                ["Bonjour le monde", "Gracias por su ayuda", "Wie geht es Ihnen"],
+  text_generation:            ["Once upon a time in a land far away…", "The quick brown fox jumps over…", "In conclusion, the results show…"],
+  code_generation:            ["def add(a, b):\n    return a + b", "SELECT * FROM users WHERE id = 1;", "console.log('hello world');"],
+  fact_verification:          ["supported", "refuted", "not enough info"],
+  retrieval:                  ["The mitochondria is the powerhouse of the cell.", "Water boils at 100°C at sea level.", ""],
+  semantic_similarity:        ["0.92", "0.14", "0.78"],
 };
 
 const SampleJsonFormat = ({ taskType, sentenceIds }) => {
@@ -108,6 +113,7 @@ const SubmitToLeaderboard = ({
   const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [sentenceIds, setSentenceIds] = useState([]);
   const [sourceSentences, setSourceSentences] = useState([]);
+  const [questionsHidden, setQuestionsHidden] = useState(null); // null | {count, message}
   const [translations, setTranslations] = useState([]);
   const [modelNameInput, setModelNameInput] = useState("");
   const [submitResult, setSubmitResult] = useState(null);
@@ -222,6 +228,7 @@ const SubmitToLeaderboard = ({
   const fetchSentences = async () => {
     setErrorMsg("");
     setSubmitResult(null);
+    setQuestionsHidden(null);
     setLoadingFetch(true);
     try {
       const url = new URL(`${API_BASE}/public/get_source_sentences`);
@@ -230,6 +237,13 @@ const SubmitToLeaderboard = ({
       url.searchParams.set("start_idx", "0");
       const res = await fetch(url.toString());
       const data = await res.json();
+      if (res.status === 403 && data.questions_public === false) {
+        const n = data.question_count || 0;
+        setQuestionsHidden({ count: n, message: data.error });
+        setSentenceIds(Array.from({ length: n }, (_, i) => i));
+        setTranslations(new Array(n).fill(""));
+        return;
+      }
       if (!res.ok || data.success !== true) {
         throw new Error(data.error || "Failed to fetch sentences");
       }
@@ -1078,6 +1092,21 @@ const SubmitToLeaderboard = ({
             )}
           </div>
 
+          {/* Hidden questions notice */}
+          {questionsHidden && (
+            <div className="mb-4 rounded-xl border border-yellow-700/50 bg-yellow-900/10 p-4">
+              <div className="flex items-start gap-3">
+                <span className="text-yellow-500 text-lg shrink-0">⚠</span>
+                <div>
+                  <p className="text-sm font-semibold text-yellow-300">Questions hidden for this dataset</p>
+                  <p className="text-xs text-yellow-400/80 mt-1">
+                    This benchmark hides its test questions to prevent overfitting. There are <strong>{questionsHidden.count}</strong> questions using IDs 0–{questionsHidden.count - 1}. Submit your predictions blind using the JSON tab or Run with LLM.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {sourceSentences.length > 0 && (
             <>
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden mb-3">
@@ -1165,7 +1194,21 @@ const SubmitToLeaderboard = ({
                   </div>
                 )}
               </div>
+
+              {/* Sample return format — always visible once questions are fetched */}
+              <SampleJsonFormat
+                taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
+                sentenceIds={sentenceIds.slice(0, 3)}
+              />
             </>
+          )}
+
+          {/* Sample format even when questions are hidden */}
+          {questionsHidden && (
+            <SampleJsonFormat
+              taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
+              sentenceIds={[0, 1, 2]}
+            />
           )}
 
           {/* Submission format accordion */}
@@ -1563,20 +1606,77 @@ const SubmitToLeaderboard = ({
           )}
 
           {submitResult && (
-            <div className="mt-5 rounded-xl border border-[#defe47]/20 bg-[#defe47]/5 px-5 py-4 space-y-1">
-              <div className="text-[#defe47] font-semibold">
-                Submitted! Score:{" "}
-                <span>{typeof submitResult.score === "number" ? submitResult.score.toFixed(4) : submitResult.score}</span>
-                {submitResult.metric && <span className="text-gray-400 font-normal ml-1">({submitResult.metric})</span>}
-              </div>
-              {submitResult.submission_id != null && (
-                <div className="text-xs text-gray-500">Submission id: {submitResult.submission_id}</div>
-              )}
-              {submitResult.detailed_scores && (
-                <div className="text-xs font-mono text-gray-400 break-all pt-1">
-                  {formatMetricsSummary(submitResult.detailed_scores)}
+            <div className="mt-6 rounded-2xl border border-[#defe47]/30 bg-[#0d1a0a] overflow-hidden">
+              {/* Header */}
+              <div className="bg-[#defe47]/10 border-b border-[#defe47]/20 px-5 py-4 flex items-center gap-3">
+                <span className="text-2xl">✓</span>
+                <div>
+                  <p className="text-[#defe47] font-bold text-lg">Submission scored!</p>
+                  <p className="text-xs text-gray-400">
+                    {submitResult.submission_id != null ? `Submission #${submitResult.submission_id} · ` : ""}
+                    {datasetKey}
+                  </p>
                 </div>
-              )}
+              </div>
+
+              {/* Score */}
+              <div className="px-5 py-5 flex flex-wrap items-end gap-6 border-b border-gray-800">
+                <div>
+                  <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">
+                    {submitResult.metric || "Score"}
+                  </div>
+                  <div className="text-5xl font-black tabular-nums text-[#defe47]">
+                    {typeof submitResult.score === "number" ? submitResult.score.toFixed(4) : submitResult.score}
+                  </div>
+                  {submitResult.detailed_scores?.ci_low != null && (
+                    <div className="text-xs text-gray-400 mt-1 font-mono">
+                      95% CI: [{submitResult.detailed_scores.ci_low.toFixed(4)}&nbsp;–&nbsp;{submitResult.detailed_scores.ci_high.toFixed(4)}]
+                    </div>
+                  )}
+                </div>
+                {submitResult.detailed_scores && (
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">All metrics</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs font-mono">
+                      {Object.entries(submitResult.detailed_scores)
+                        .filter(([k]) => !["ci_low", "ci_high", "ci_level"].includes(k))
+                        .map(([k, v]) => (
+                          <div key={k} className="flex justify-between gap-2">
+                            <span className="text-gray-500 truncate">{k}</span>
+                            <span className="text-gray-200 shrink-0">
+                              {typeof v === "number" ? (v <= 1 ? v.toFixed(4) : v.toFixed(2)) : String(v)}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="px-5 py-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => navigate("/")}
+                  className="px-4 py-2 rounded-lg bg-[#defe47] text-black text-sm font-semibold hover:bg-[#e8ff70]"
+                >
+                  View leaderboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate("/my-submissions")}
+                  className="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 text-sm hover:bg-white/5"
+                >
+                  My submissions
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSubmitResult(null); setTranslations([]); setSentenceIds([]); setSourceSentences([]); setModelNameInput(""); }}
+                  className="px-4 py-2 rounded-lg border border-gray-700 text-gray-500 text-sm hover:bg-white/5"
+                >
+                  Submit another model
+                </button>
+              </div>
             </div>
           )}
         </section>

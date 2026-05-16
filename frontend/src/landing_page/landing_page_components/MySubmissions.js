@@ -459,6 +459,11 @@ const MySubmissions = () => {
                         <div className="text-xs uppercase tracking-wide text-gray-500">Primary score</div>
                         <div className="text-3xl font-bold text-[#defe47] tabular-nums">{formatScore(r.score)}</div>
                         <div className="text-xs text-gray-500">{r.primary_metric || "primary metric"}</div>
+                        {r.detailed_scores?.ci_low != null && (
+                          <div className="text-xs text-gray-500 font-mono mt-0.5">
+                            95% CI [{Number(r.detailed_scores.ci_low).toFixed(4)}–{Number(r.detailed_scores.ci_high).toFixed(4)}]
+                          </div>
+                        )}
                       </div>
                       <div className="md:col-span-2 text-xs text-gray-400 space-y-1">
                         <div><span className="text-gray-500">Dataset:</span> {r.dataset_name}</div>

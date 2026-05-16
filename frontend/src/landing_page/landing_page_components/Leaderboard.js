@@ -140,6 +140,8 @@ function groupLeaderboardEntries(entries) {
       if ((e.url || e.dataset_url || e.metadata?.url) && !acc[key].url) acc[key].url = e.url || e.dataset_url || e.metadata?.url;
       if (typeof e.submission_count === "number") acc[key].submission_count = Math.max(acc[key].submission_count || 0, e.submission_count);
     }
+    const ciLow = e.ci_low ?? e.detailed_scores?.ci_low;
+    const ciHigh = e.ci_high ?? e.detailed_scores?.ci_high;
     acc[key].models.push({
       model: e.model_name,
       score: typeof e.score === "number" ? e.score : Number(e.score) || 0,
@@ -148,6 +150,9 @@ function groupLeaderboardEntries(entries) {
       updated: e.submitted_at ? new Date(e.submitted_at).toLocaleDateString() : "",
       primary_metric: e.primary_metric,
       detailed_scores: e.detailed_scores,
+      ci: (ciLow != null && ciHigh != null)
+        ? `95% CI [${Number(ciLow).toFixed(3)}–${Number(ciHigh).toFixed(3)}]`
+        : null,
     });
     return acc;
   }, {});

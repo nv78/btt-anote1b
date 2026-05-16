@@ -5,9 +5,18 @@ ground_truth + predictions shapes, run evaluators, resolve primary score.
 from __future__ import annotations
 
 import json
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 from eval_core.evaluators import get_evaluator
+
+# Metrics where bootstrap CI is cheap (pure Python counting). Skip for
+# BLEU/BERTScore/ROUGE which are slow per-call.
+_CI_FAST_METRICS = frozenset({
+    "accuracy", "f1", "f1_macro", "micro_f1", "exact_match",
+    "precision", "recall", "balanced_accuracy",
+    "retrieval_accuracy", "mrr",
+})
 
 
 def normalize_task_type(task_type: Optional[str]) -> str:
@@ -148,6 +157,40 @@ def build_personal_eval_inputs(
     return tt, primary, ground_truth, predictions
 
 
+def _bootstrap_ci(
+    ground_truth: List[Dict],
+    predictions: List[Dict],
+    evaluator,
+    primary_metric: str,
+    n_resamples: int = 200,
+    ci_level: float = 0.95,
+) -> Optional[Tuple[float, float]]:
+    """Return (ci_low, ci_high) via nonparametric bootstrap, or None if not applicable."""
+    if primary_metric not in _CI_FAST_METRICS:
+        return None
+    n = len(ground_truth)
+    if n < 10:
+        return None
+    scores: List[float] = []
+    for _ in range(n_resamples):
+        idxs = [random.randint(0, n - 1) for _ in range(n)]
+        gt_s = [ground_truth[i] for i in idxs]
+        pr_s = [predictions[i] for i in idxs]
+        try:
+            det = evaluator.evaluate(gt_s, pr_s)
+            v = det.get(primary_metric)
+            if v is not None:
+                scores.append(float(v))
+        except Exception:
+            pass
+    if len(scores) < 20:
+        return None
+    scores.sort()
+    lo = int((1 - ci_level) / 2 * len(scores))
+    hi = int((1 + ci_level) / 2 * len(scores))
+    return scores[lo], scores[min(hi, len(scores) - 1)]
+
+
 def run_personal_eval(
     task_type_raw: Optional[str],
     evaluation_metric: Optional[str],
@@ -158,7 +201,7 @@ def run_personal_eval(
     reference_translations: Optional[List[Any]],
     model_results: List[Any],
 ) -> Tuple[float, Dict[str, Any]]:
-    """Compute primary score and full detailed_scores dict."""
+    """Compute primary score, full detailed_scores dict, and 95% bootstrap CI."""
     tt, _default_primary, gt, preds = build_personal_eval_inputs(
         sentence_ids,
         task_type_raw,
@@ -172,6 +215,11 @@ def run_personal_eval(
     evaluator = get_evaluator(tt)
     detailed = evaluator.evaluate(gt, preds)
     score = _pick_primary(detailed, requested, tt)
+    ci = _bootstrap_ci(gt, preds, evaluator, requested)
+    if ci is not None:
+        detailed["ci_low"] = round(ci[0], 6)
+        detailed["ci_high"] = round(ci[1], 6)
+        detailed["ci_level"] = 0.95
     return float(score), detailed
 
 

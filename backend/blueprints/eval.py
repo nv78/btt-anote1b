@@ -26,18 +26,39 @@ def get_source_sentences():
     conn, cursor = get_db_connection()
     if conn and cursor:
         try:
-            cursor.execute(
-                "SELECT reference_data FROM benchmark_datasets WHERE name = %s AND active = TRUE",
-                (dataset_name,)
-            )
+            try:
+                cursor.execute(
+                    "SELECT reference_data, questions_public FROM benchmark_datasets WHERE name = %s AND active = TRUE",
+                    (dataset_name,)
+                )
+            except Exception:
+                cursor.execute(
+                    "SELECT reference_data FROM benchmark_datasets WHERE name = %s AND active = TRUE",
+                    (dataset_name,)
+                )
             row = cursor.fetchone()
-            if row and row.get('reference_data'):
-                try:
-                    ref = json.loads(row['reference_data']) if isinstance(row['reference_data'], str) else row['reference_data']
-                    if isinstance(ref, dict) and isinstance(ref.get('source_texts'), list):
-                        pool = ref['source_texts']
-                except Exception:
-                    pool = None
+            if row:
+                if not bool(row.get('questions_public', 1)):
+                    try:
+                        ref = json.loads(row['reference_data']) if isinstance(row.get('reference_data'), str) else (row.get('reference_data') or {})
+                        n = len(ref.get('source_texts') or ref.get('ground_truth') or [])
+                    except Exception:
+                        n = 0
+                    try: cursor.close(); conn.close()
+                    except Exception: pass
+                    return jsonify({
+                        "success": False,
+                        "questions_public": False,
+                        "question_count": n,
+                        "error": "Questions for this dataset are hidden. Use IDs 0–{} when submitting.".format(n - 1),
+                    }), 403
+                if row.get('reference_data'):
+                    try:
+                        ref = json.loads(row['reference_data']) if isinstance(row['reference_data'], str) else row['reference_data']
+                        if isinstance(ref, dict) and isinstance(ref.get('source_texts'), list):
+                            pool = ref['source_texts']
+                    except Exception:
+                        pool = None
         finally:
             try:
                 cursor.close()

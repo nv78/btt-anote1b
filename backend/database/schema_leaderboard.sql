@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS benchmark_datasets (
     evaluation_metric TEXT NOT NULL,
     reference_data TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
+    questions_public INTEGER NOT NULL DEFAULT 1,
     created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

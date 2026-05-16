@@ -124,11 +124,21 @@ def dataset_questions() -> Any:
     if conn and cursor:
         try:
             cursor.execute(
-                "SELECT name, task_type, evaluation_metric, reference_data FROM benchmark_datasets "
+                "SELECT name, task_type, evaluation_metric, reference_data, questions_public FROM benchmark_datasets "
                 "WHERE name = %s AND active = TRUE",
                 (name,),
             )
             dataset = cursor.fetchone()
+        except Exception:
+            try:
+                cursor.execute(
+                    "SELECT name, task_type, evaluation_metric, reference_data FROM benchmark_datasets "
+                    "WHERE name = %s AND active = TRUE",
+                    (name,),
+                )
+                dataset = cursor.fetchone()
+            except Exception:
+                pass
         finally:
             try:
                 cursor.close()
@@ -140,10 +150,28 @@ def dataset_questions() -> Any:
     if not dataset:
         return jsonify({"success": False, "error": "Dataset not found"}), 404
 
+    questions_public = bool(dataset.get("questions_public", 1))
+    if not questions_public:
+        # Count items without revealing text
+        rd = dataset.get("reference_data") or {}
+        if isinstance(rd, str):
+            try: rd = json.loads(rd)
+            except Exception: rd = {}
+        n = len(rd.get("source_texts") or rd.get("ground_truth") or [])
+        return jsonify({
+            "success": True,
+            "dataset": dataset.get("name", name),
+            "task_type": dataset.get("task_type"),
+            "questions_public": False,
+            "question_count": n,
+            "message": "Questions for this dataset are hidden to prevent overfitting. Submit predictions using sequential IDs 0 to {}.".format(n - 1),
+        })
+
     return jsonify({
         "success": True,
         "dataset": dataset.get("name", name),
         "task_type": dataset.get("task_type"),
+        "questions_public": True,
         "questions": _questions_from_reference_data(dataset.get("reference_data")),
     })
 
@@ -316,6 +344,7 @@ def get_leaderboard():
                     reference_data = json.loads(row["reference_data"]) if isinstance(row["reference_data"], str) else row["reference_data"]
                 except Exception:
                     reference_data = {}
+            ds_scores = details.get("detailed_scores") if isinstance(details, dict) else None
             leaderboard.append({
                 "rank": r0 + j,
                 "submission_id": row.get("submission_id"),
@@ -326,9 +355,11 @@ def get_leaderboard():
                 "task_type": row.get("task_type"),
                 "evaluation_metric": row.get("evaluation_metric"),
                 "score": float(row["score"]),
+                "ci_low": ds_scores.get("ci_low") if isinstance(ds_scores, dict) else None,
+                "ci_high": ds_scores.get("ci_high") if isinstance(ds_scores, dict) else None,
                 "submitted_by": row.get("submitted_by"),
                 "metadata": details.get("metadata") if isinstance(details, dict) else None,
-                "detailed_scores": details.get("detailed_scores") if isinstance(details, dict) else None,
+                "detailed_scores": ds_scores,
                 "primary_metric": details.get("metric") if isinstance(details, dict) else None,
                 "submitted_at": row["submitted_at"].isoformat() if row.get("submitted_at") else None,
             })
@@ -1028,6 +1059,53 @@ def list_leaderboard_datasets():
         "status": "success",
         "datasets": LEADERBOARD_DATA,
     })
+
+@bp.patch('/api/admin/datasets/<string:dataset_name>/questions_public')
+def set_questions_public(dataset_name: str):
+    """Admin: toggle whether questions are shown publicly for a dataset.
+
+    Body: {"questions_public": true|false}
+    """
+    jwt_sub = jwt_sub_from_request(request)
+    if not jwt_sub:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    body = request.get_json(silent=True) or {}
+    raw = body.get("questions_public")
+    if raw is None:
+        return jsonify({"success": False, "error": "Missing questions_public field"}), 400
+    val = 0 if str(raw).lower() in ("false", "0", "no") else 1
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            try:
+                cursor.execute(
+                    "UPDATE benchmark_datasets SET questions_public = %s WHERE name = %s",
+                    (val, dataset_name),
+                )
+            except Exception as upd_err:
+                if "questions_public" in str(upd_err).lower() or "no column" in str(upd_err).lower():
+                    cursor.execute("ALTER TABLE benchmark_datasets ADD COLUMN questions_public INTEGER NOT NULL DEFAULT 1")
+                    conn.commit()
+                    cursor.execute("UPDATE benchmark_datasets SET questions_public = %s WHERE name = %s", (val, dataset_name))
+                else:
+                    raise
+            if cursor.rowcount == 0:
+                return jsonify({"success": False, "error": "Dataset not found"}), 404
+            conn.commit()
+            return jsonify({"success": True, "dataset": dataset_name, "questions_public": bool(val)})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            try: cursor.close(); conn.close()
+            except Exception: pass
+    # In-memory fallback
+    ds = next((d for d in _STORE["datasets"] if d.get("name") == dataset_name), None)
+    if not ds:
+        return jsonify({"success": False, "error": "Dataset not found"}), 404
+    ds["questions_public"] = val
+    return jsonify({"success": True, "dataset": dataset_name, "questions_public": bool(val)})
+
 
 _AUTO_SEED_DONE = False
 _AUTO_SEED_LOCK = threading.Lock()
