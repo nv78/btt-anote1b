@@ -1590,10 +1590,16 @@ const Leaderboard = () => {
   ];
   const navigate = useNavigate();
 
-  const showDemoCards = isDemoMode && apiFailed;
+  // Always show static datasets merged with live data; live DB entries take precedence for matching names
+  const mergeWithStatic = (live) => {
+    const liveNames = new Set(live.map((d) => d.name));
+    const staticOnly = datasets.filter((d) => !liveNames.has(d.name));
+    return [...live, ...staticOnly];
+  };
+
   const displayDatasets = viewMode === 'curated'
-    ? (curatedDatasets.length ? curatedDatasets : (showDemoCards ? datasets : []))
-    : (liveDatasets.length ? liveDatasets : (showDemoCards ? datasets : []));
+    ? (curatedDatasets.length ? mergeWithStatic(curatedDatasets) : datasets)
+    : mergeWithStatic(liveDatasets);
 
   const TASK_PILLS = [
     { value: "", label: "All" },
