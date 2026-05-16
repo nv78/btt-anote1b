@@ -4,7 +4,6 @@ import {
   addDatasetPath,
   createLeaderboardPath,
   csvBenchmarksPath,
-  evaluationsPath,
   loginPath,
   mySubmissionsPath,
   submittoleaderboardPath,
@@ -23,7 +22,6 @@ export default function HeaderBar() {
 
   const navItems = [
     { label: 'Leaderboard', path: '/' },
-    { label: 'Evaluations', path: evaluationsPath },
     { label: 'Submit', path: submittoleaderboardPath },
     { label: 'My submissions', path: mySubmissionsPath },
     { label: 'Add Dataset', path: addDatasetPath },

@@ -176,8 +176,8 @@ const Leaderboard = () => {
   const [liveEntries, setLiveEntries] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [liveDatasetFilter, setLiveDatasetFilter] = useState("");
-  const [datasetOptions, setDatasetOptions] = useState([]);
+  const [taskFilter, setTaskFilter] = useState("");
+  const [domainFilter, setDomainFilter] = useState("");
   const [curatedDatasets, setCuratedDatasets] = useState([]);
   const [viewMode, setViewMode] = useState('live'); // 'live' | 'curated'
   const [loading, setLoading] = useState(true);
@@ -193,28 +193,6 @@ const Leaderboard = () => {
     setApiFailed(false);
     setRefreshNonce((n) => n + 1);
   };
-
-  useEffect(() => {
-    let ignore = false;
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/public/datasets`);
-        const data = await res.json();
-        if (!res.ok) throw new Error("Failed to load datasets");
-        if (!ignore && data.success && Array.isArray(data.datasets)) {
-          setDatasetOptions(
-            data.datasets.map((d) => ({ name: d.name, label: `${d.name} (${d.task_type || "task"})` }))
-          );
-        }
-      } catch {
-        if (!ignore) {
-          setDatasetOptions([]);
-          setApiFailed(true);
-        }
-      }
-    })();
-    return () => { ignore = true; };
-  }, [API_BASE, refreshNonce]);
 
   useEffect(() => {
     let ignore = false;
@@ -247,7 +225,7 @@ const Leaderboard = () => {
     };
     run();
     return () => { ignore = true; };
-  }, [API_BASE, liveDatasetFilter, refreshNonce]);
+  }, [API_BASE, refreshNonce]);
 
   const loadMoreLive = async () => {
     if (!nextCursor || loadingMore) return;
@@ -256,7 +234,6 @@ const Leaderboard = () => {
     try {
       const url = new URL(`${API_BASE}/public/get_leaderboard`);
       url.searchParams.set("page_size", "40");
-      if (liveDatasetFilter) url.searchParams.set("dataset", liveDatasetFilter);
       url.searchParams.set("cursor", nextCursor);
       const res = await fetch(url.toString());
       const data = await res.json();
@@ -1300,6 +1277,35 @@ const Leaderboard = () => {
     ? (curatedDatasets.length ? curatedDatasets : (showDemoCards ? datasets : []))
     : (liveDatasets.length ? liveDatasets : (showDemoCards ? datasets : []));
 
+  const TASK_PILLS = [
+    { value: "", label: "All" },
+    { value: "text_classification", label: "Classification" },
+    { value: "named_entity_recognition", label: "NER" },
+    { value: "document_qa", label: "Q&A" },
+    { value: "retrieval", label: "Retrieval" },
+    { value: "translation", label: "Translation" },
+  ];
+
+  const availableDomains = useMemo(() => {
+    const seen = new Set();
+    for (const d of displayDatasets) {
+      seen.add(domainMeta(d.name, d.task_type).label);
+    }
+    return Array.from(seen).sort();
+  }, [displayDatasets]);
+
+  const filteredDatasets = useMemo(() => {
+    return displayDatasets.filter((d) => {
+      if (taskFilter) {
+        const tt = (d.task_type || "").toLowerCase();
+        const match = tt === taskFilter || (taskFilter === "named_entity_recognition" && tt === "ner");
+        if (!match) return false;
+      }
+      if (domainFilter && domainMeta(d.name, d.task_type).label !== domainFilter) return false;
+      return true;
+    });
+  }, [displayDatasets, taskFilter, domainFilter]);
+
   const rankBadge = (rank) => {
     if (rank === 1) return <span title="1st place" className="mr-1">🥇</span>;
     if (rank === 2) return <span title="2nd place" className="mr-1">🥈</span>;
@@ -1347,25 +1353,51 @@ const Leaderboard = () => {
         </div>
       </header>
 
-      <div className="w-full max-w-7xl mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 px-2">
-        <label className="text-sm text-gray-400 flex flex-col sm:flex-row sm:items-center gap-2">
-          <span className="shrink-0">Live dataset</span>
-          <select
-            value={liveDatasetFilter}
-            onChange={(e) => setLiveDatasetFilter(e.target.value)}
-            className="rounded-lg bg-[#0d1421] border border-gray-700 text-white text-sm px-3 py-2 min-w-[220px]"
-          >
-            <option value="">All datasets</option>
-            {datasetOptions.map((o) => (
-              <option key={o.name} value={o.name}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="text-xs text-gray-500 sm:max-w-md">
-          Uses <code className="text-gray-400">GET /public/get_leaderboard?dataset=</code>. Resets pagination when changed.
-        </p>
+      {/* ── Filters ── */}
+      <div className="w-full max-w-7xl mt-6 px-2 flex flex-col gap-3">
+        {/* Task type pills */}
+        <div className="flex flex-wrap gap-2">
+          {TASK_PILLS.map((pill) => (
+            <button
+              key={pill.value}
+              type="button"
+              onClick={() => setTaskFilter(pill.value)}
+              className={[
+                "px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors",
+                taskFilter === pill.value
+                  ? "bg-[#defe47]/10 border-[#defe47]/50 text-[#defe47]"
+                  : "bg-transparent border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300",
+              ].join(" ")}
+            >
+              {pill.label}
+            </button>
+          ))}
+        </div>
+        {/* Domain dropdown */}
+        {availableDomains.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 shrink-0">Domain</span>
+            <select
+              value={domainFilter}
+              onChange={(e) => setDomainFilter(e.target.value)}
+              className="rounded-lg bg-[#0d1421] border border-gray-700 text-white text-xs px-3 py-1.5"
+            >
+              <option value="">All domains</option>
+              {availableDomains.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+            {(taskFilter || domainFilter) && (
+              <button
+                type="button"
+                onClick={() => { setTaskFilter(""); setDomainFilter(""); }}
+                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {apiFailed && (
@@ -1414,7 +1446,20 @@ const Leaderboard = () => {
                 </button>
               </div>
             )
-          : displayDatasets.map((dataset, index) => {
+          : filteredDatasets.length === 0 && displayDatasets.length > 0
+            ? (
+              <div className="md:col-span-2 rounded-2xl border border-gray-800 bg-[#0d1421] px-6 py-12 text-center">
+                <div className="text-base font-semibold text-white">No datasets match these filters.</div>
+                <button
+                  type="button"
+                  onClick={() => { setTaskFilter(""); setDomainFilter(""); }}
+                  className="mt-4 text-sm text-[#defe47] hover:underline"
+                >
+                  Clear filters
+                </button>
+              </div>
+            )
+          : filteredDatasets.map((dataset, index) => {
           const dkey = dataset.name || `idx-${index}`;
           const showAdv = !!advancedMetrics[dkey];
           const showAllRanks = !!expandedRankDepth[dkey];

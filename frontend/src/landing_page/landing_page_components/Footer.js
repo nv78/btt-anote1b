@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import {
   addDatasetPath,
   csvBenchmarksPath,
-  evaluationsPath,
   submittoleaderboardPath,
 } from "../../constants/RouteConstants";
 
@@ -13,7 +12,6 @@ function Footer() {
 
   const leaderboardLinks = [
     { label: "View Rankings", path: "/" },
-    { label: "Evaluations", path: evaluationsPath },
     { label: "Submit Model", path: submittoleaderboardPath },
     { label: "Add Dataset", path: addDatasetPath },
     { label: "Run Benchmarks", path: csvBenchmarksPath },

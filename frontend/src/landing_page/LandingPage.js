@@ -15,7 +15,6 @@ import { useLocation } from "react-router-dom";
 import { robotHeader } from "../util/RobotHeader";
 import Leaderboard from "./landing_page_components/Leaderboard";
 import SubmitToLeaderboard  from "./landing_page_components/SubmitToLeaderboard";
-import Evaluations  from "./landing_page_components/Evaluations"
 import AdminLeaderboardManager from "./landing_page_components/AdminLeaderboardManager";
 import AdminSubmissionsModeration from "./landing_page_components/AdminSubmissionsModeration";
 import AddDataset from "./landing_page_components/AddDataset";
@@ -76,7 +75,6 @@ function LandingPage() {
           <Route path={oauthCallbackPath} element={<OAuthCallback />} />,
           <Route path={submittoleaderboardPath} index element={<AuthGuard><SubmitToLeaderboard /></AuthGuard>} />,
           <Route path={mySubmissionsPath} index element={<AuthGuard><MySubmissions /></AuthGuard>} />,
-          <Route path={evaluationsPath} index element={<Evaluations />} />,
           <Route path={csvBenchmarksPath} index element={<CsvBenchmarksDemo />} />,
           <Route path={addDatasetPath} index element={<AddDataset />} />,
           <Route path={createLeaderboardPath} index element={<CreateLeaderboardFromHF />} />,
