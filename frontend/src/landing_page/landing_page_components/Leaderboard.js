@@ -204,7 +204,6 @@ const Leaderboard = () => {
       try {
         const url = new URL(`${API_BASE}/public/get_leaderboard`);
         url.searchParams.set("page_size", "40");
-        if (liveDatasetFilter) url.searchParams.set("dataset", liveDatasetFilter);
         const res = await fetch(url.toString());
         const data = await res.json();
         if (!res.ok || data.success !== true) throw new Error(data.error || "Failed to load leaderboard");
