@@ -3,12 +3,21 @@ import React, { useState } from "react";
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
 
 const TASK_TYPES = [
-  { value: "text_classification", label: "Text Classification" },
-  { value: "named_entity_recognition", label: "Named Entity Recognition (NER)" },
-  { value: "document_qa", label: "Document Q&A" },
-  { value: "retrieval", label: "Retrieval / RAG" },
-  { value: "translation", label: "Translation" },
-  { value: "other", label: "Other (specify below)" },
+  { value: "text_classification",        label: "Text Classification" },
+  { value: "named_entity_recognition",   label: "Named Entity Recognition (NER)" },
+  { value: "document_qa",                label: "Document Q&A" },
+  { value: "multiple_choice_qa",         label: "Multiple Choice Q&A" },
+  { value: "retrieval",                  label: "Retrieval / RAG" },
+  { value: "summarization",              label: "Summarization" },
+  { value: "translation",                label: "Translation" },
+  { value: "natural_language_inference", label: "Natural Language Inference (NLI)" },
+  { value: "semantic_similarity",        label: "Semantic Similarity" },
+  { value: "code_generation",            label: "Code Generation" },
+  { value: "math_reasoning",             label: "Math & Reasoning" },
+  { value: "text_generation",            label: "Text Generation" },
+  { value: "fact_verification",          label: "Fact Verification" },
+  { value: "dialogue",                   label: "Dialogue / Conversation" },
+  { value: "other",                      label: "Other (specify below)" },
 ];
 
 const empty = { dataset_name: "", task_type: "text_classification", custom_task_type: "", description: "", url: "", requested_by: "" };

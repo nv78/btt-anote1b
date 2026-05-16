@@ -16,56 +16,61 @@ function humanizeMetricKey(metric) {
 function domainMeta(datasetName, taskType) {
   const name = String(datasetName || "").toLowerCase();
   const task = String(taskType || "").toLowerCase();
-  if (name.includes("financ") || name.includes("banking") || name.includes("phrasebank") || name.includes("finqa") || name.includes("fiq") || name.includes("twitter") || name.includes("wnut"))
+  if (name.includes("financ") || name.includes("banking") || name.includes("phrasebank") || name.includes("finqa") || name.includes("fiq") || name.includes("wnut"))
     return { label: "Finance", className: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30" };
-  if (name.includes("medical") || name.includes("clinical") || name.includes("health") || name.includes("pubmed"))
-    return { label: "Medical", className: "bg-pink-500/15 text-pink-300 border-pink-400/30" };
-  if (name.includes("legal") || name.includes("law") || name.includes("contract"))
+  if (name.includes("medical") || name.includes("clinical") || name.includes("health") || name.includes("pubmed") || name.includes("bio") || name.includes("drug") || name.includes("pharma") || name.includes("mimic"))
+    return { label: "Medical & Pharma", className: "bg-pink-500/15 text-pink-300 border-pink-400/30" };
+  if (name.includes("legal") || name.includes("law") || name.includes("contract") || name.includes("court") || name.includes("statute"))
     return { label: "Legal", className: "bg-amber-500/15 text-amber-300 border-amber-400/30" };
-  if (name.includes("code") || name.includes("mbpp") || name.includes("humaneval") || name.includes("gsm"))
+  if (name.includes("code") || name.includes("mbpp") || name.includes("humaneval") || name.includes("gsm") || name.includes("math") || name.includes("aqua") || name.includes("ds-1000"))
     return { label: "Code & Math", className: "bg-cyan-500/15 text-cyan-300 border-cyan-400/30" };
-  if (name.includes("science") || name.includes("arc") || name.includes("mmlu") || name.includes("commonsense") || name.includes("reasoning"))
+  if (name.includes("science") || name.includes("arc") || name.includes("mmlu") || name.includes("commonsense") || name.includes("reasoning") || name.includes("hellaswag") || name.includes("winogrande"))
     return { label: "Science & Reasoning", className: "bg-violet-500/15 text-violet-300 border-violet-400/30" };
-  if (name.includes("geoloc") || name.includes("location") || name.includes("geo"))
+  if (name.includes("geoloc") || name.includes("location") || name.includes("geo") || name.includes("visual") || name.includes("image") || name.includes("vqa"))
     return { label: "Vision & Geography", className: "bg-teal-500/15 text-teal-300 border-teal-400/30" };
-  if (name.includes("amazon") || name.includes("review") || name.includes("product"))
+  if (name.includes("amazon") || name.includes("review") || name.includes("product") || name.includes("ecomm") || name.includes("shop"))
     return { label: "E-commerce", className: "bg-orange-500/15 text-orange-300 border-orange-400/30" };
-  if (task === "translation" || name.includes("xnli") || name.includes("mgsm") || name.includes("xcopa") || name.includes("xquad"))
+  if (task === "translation" || name.includes("xnli") || name.includes("mgsm") || name.includes("xcopa") || name.includes("xquad") || name.includes("flores") || name.includes("multilingual") || name.includes("crosslingual"))
     return { label: "Multilingual", className: "bg-indigo-500/15 text-indigo-300 border-indigo-400/30" };
-  if (task === "named_entity_recognition" || task === "ner" || name.includes("conll"))
+  if (task === "named_entity_recognition" || task === "ner" || name.includes("conll") || name.includes("ontonotes") || name.includes("relation") || name.includes("event"))
     return { label: "Information Extraction", className: "bg-rose-500/15 text-rose-300 border-rose-400/30" };
-  if (task === "retrieval" || name.includes("retriev") || name.includes("rag") || name.includes("financebench"))
+  if (task === "retrieval" || name.includes("retriev") || name.includes("rag") || name.includes("financebench") || name.includes("beir") || name.includes("msmarco"))
     return { label: "Retrieval / RAG", className: "bg-sky-500/15 text-sky-300 border-sky-400/30" };
+  if (name.includes("cyber") || name.includes("security") || name.includes("malware") || name.includes("phish") || name.includes("vuln") || name.includes("cve"))
+    return { label: "Cybersecurity", className: "bg-red-500/15 text-red-300 border-red-400/30" };
+  if (name.includes("support") || name.includes("ticket") || name.includes("helpdesk") || name.includes("customer") || name.includes("dialogue") || name.includes("multiwoz"))
+    return { label: "Customer Support", className: "bg-lime-500/15 text-lime-300 border-lime-400/30" };
+  if (name.includes("edu") || name.includes("school") || name.includes("student") || name.includes("reading") || name.includes("essay") || name.includes("exam"))
+    return { label: "Education", className: "bg-yellow-500/15 text-yellow-300 border-yellow-400/30" };
+  if (name.includes("news") || name.includes("article") || name.includes("fake") || name.includes("headline") || name.includes("bbc") || name.includes("cnn"))
+    return { label: "News & Journalism", className: "bg-blue-500/15 text-blue-300 border-blue-400/30" };
+  if (name.includes("social") || name.includes("tweet") || name.includes("twitter") || name.includes("reddit") || name.includes("hate") || name.includes("toxic"))
+    return { label: "Social Media", className: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-400/30" };
+  if (name.includes("hr") || name.includes("resum") || name.includes("job") || name.includes("recruit") || name.includes("hiring"))
+    return { label: "HR & Recruiting", className: "bg-stone-500/15 text-stone-300 border-stone-400/30" };
+  if (name.includes("climate") || name.includes("energy") || name.includes("environment") || name.includes("sustain"))
+    return { label: "Climate & Energy", className: "bg-green-500/15 text-green-300 border-green-400/30" };
   return { label: "General NLP", className: "bg-gray-700/60 text-gray-300 border-gray-600/50" };
 }
 
 function taskBadgeMeta(taskType) {
   const key = String(taskType || "").toLowerCase();
   const badges = {
-    text_classification: {
-      label: "Classification",
-      className: "bg-blue-500/15 text-blue-200 border-blue-400/30",
-    },
-    retrieval: {
-      label: "Retrieval",
-      className: "bg-purple-500/15 text-purple-200 border-purple-400/30",
-    },
-    document_qa: {
-      label: "Q&A",
-      className: "bg-green-500/15 text-green-200 border-green-400/30",
-    },
-    translation: {
-      label: "Translation",
-      className: "bg-orange-500/15 text-orange-200 border-orange-400/30",
-    },
-    named_entity_recognition: {
-      label: "NER",
-      className: "bg-red-500/15 text-red-200 border-red-400/30",
-    },
-    ner: {
-      label: "NER",
-      className: "bg-red-500/15 text-red-200 border-red-400/30",
-    },
+    text_classification:        { label: "Classification",  className: "bg-blue-500/15 text-blue-200 border-blue-400/30" },
+    retrieval:                  { label: "Retrieval",       className: "bg-purple-500/15 text-purple-200 border-purple-400/30" },
+    document_qa:                { label: "Q&A",             className: "bg-green-500/15 text-green-200 border-green-400/30" },
+    translation:                { label: "Translation",     className: "bg-orange-500/15 text-orange-200 border-orange-400/30" },
+    named_entity_recognition:   { label: "NER",             className: "bg-red-500/15 text-red-200 border-red-400/30" },
+    ner:                        { label: "NER",             className: "bg-red-500/15 text-red-200 border-red-400/30" },
+    summarization:              { label: "Summarization",   className: "bg-teal-500/15 text-teal-200 border-teal-400/30" },
+    text_generation:            { label: "Generation",      className: "bg-violet-500/15 text-violet-200 border-violet-400/30" },
+    multiple_choice_qa:         { label: "Multiple Choice", className: "bg-amber-500/15 text-amber-200 border-amber-400/30" },
+    natural_language_inference: { label: "NLI",             className: "bg-pink-500/15 text-pink-200 border-pink-400/30" },
+    semantic_similarity:        { label: "Similarity",      className: "bg-cyan-500/15 text-cyan-200 border-cyan-400/30" },
+    code_generation:            { label: "Code",            className: "bg-emerald-500/15 text-emerald-200 border-emerald-400/30" },
+    math_reasoning:             { label: "Math",            className: "bg-indigo-500/15 text-indigo-200 border-indigo-400/30" },
+    fact_verification:          { label: "Fact Check",      className: "bg-rose-500/15 text-rose-200 border-rose-400/30" },
+    dialogue:                   { label: "Dialogue",        className: "bg-sky-500/15 text-sky-200 border-sky-400/30" },
   };
   return badges[key] || {
     label: humanizeMetricKey(taskType) || "Task",
@@ -1282,8 +1287,17 @@ const Leaderboard = () => {
     { value: "text_classification", label: "Classification" },
     { value: "named_entity_recognition", label: "NER" },
     { value: "document_qa", label: "Q&A" },
+    { value: "multiple_choice_qa", label: "Multiple Choice" },
     { value: "retrieval", label: "Retrieval" },
+    { value: "summarization", label: "Summarization" },
     { value: "translation", label: "Translation" },
+    { value: "natural_language_inference", label: "NLI" },
+    { value: "semantic_similarity", label: "Similarity" },
+    { value: "code_generation", label: "Code" },
+    { value: "math_reasoning", label: "Math" },
+    { value: "text_generation", label: "Generation" },
+    { value: "fact_verification", label: "Fact Check" },
+    { value: "dialogue", label: "Dialogue" },
   ];
 
   const availableDomains = useMemo(() => {
