@@ -48,7 +48,6 @@ const SubmitToLeaderboard = ({
   const navigate = useNavigate();
   // ---------- Leaderboard submission state ----------
   const [datasetKey, setDatasetKey] = useState("flores_spanish_translation");
-  const [count, setCount] = useState(3);
   const [loadingFetch, setLoadingFetch] = useState(false);
   const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [sentenceIds, setSentenceIds] = useState([]);
@@ -155,7 +154,7 @@ const SubmitToLeaderboard = ({
     try {
       const url = new URL(`${API_BASE}/public/get_source_sentences`);
       url.searchParams.set("dataset_name", datasetKey);
-      url.searchParams.set("count", String(count));
+      url.searchParams.set("count", String(selectedDatasetMeta.size || 1000));
       url.searchParams.set("start_idx", "0");
       const res = await fetch(url.toString());
       const data = await res.json();
@@ -272,6 +271,97 @@ const SubmitToLeaderboard = ({
   const filteredDatasetOptions = datasetOptions.filter((o) =>
     !dsSearch.trim() || o.value.toLowerCase().includes(dsSearch.trim().toLowerCase())
   );
+
+  const TASK_EXAMPLES = {
+    translation: {
+      label: "Translation",
+      input: "The annual report shows a significant increase in revenue across all business segments.",
+      output: "El informe anual muestra un aumento significativo en los ingresos en todos los segmentos comerciales.",
+      outputLabel: "Your translation",
+    },
+    text_classification: {
+      label: "Text Classification",
+      input: "The product quality exceeded my expectations and shipping was incredibly fast.",
+      output: "positive",
+      outputLabel: "Your label (e.g. positive / negative / neutral)",
+    },
+    named_entity_recognition: {
+      label: "Named Entity Recognition",
+      input: "Apple CEO Tim Cook announced a new partnership with Microsoft in Seattle.",
+      output: '[{"text":"Apple","label":"ORG"},{"text":"Tim Cook","label":"PER"},{"text":"Microsoft","label":"ORG"},{"text":"Seattle","label":"LOC"}]',
+      outputLabel: "Your entities as JSON array",
+    },
+    ner: {
+      label: "NER",
+      input: "Apple CEO Tim Cook announced a new partnership with Microsoft in Seattle.",
+      output: '[{"text":"Apple","label":"ORG"},{"text":"Tim Cook","label":"PER"},{"text":"Microsoft","label":"ORG"},{"text":"Seattle","label":"LOC"}]',
+      outputLabel: "Your entities as JSON array",
+    },
+    document_qa: {
+      label: "Document Q&A",
+      input: "Q: What was the company's total revenue in Q3? (Document: FinanceBench 2023 Annual Report)",
+      output: "$4.2 billion",
+      outputLabel: "Your answer (concise, from the document)",
+    },
+    multiple_choice_qa: {
+      label: "Multiple Choice Q&A",
+      input: "Which of the following best describes photosynthesis?\nA) Cellular respiration\nB) Conversion of sunlight to glucose\nC) DNA replication\nD) Protein synthesis",
+      output: "B",
+      outputLabel: "Your answer (A / B / C / D)",
+    },
+    retrieval: {
+      label: "Retrieval",
+      input: "Query: What are the tax implications of a Section 1031 exchange?",
+      output: "doc_id_4821",
+      outputLabel: "Your retrieved document id or passage",
+    },
+    summarization: {
+      label: "Summarization",
+      input: "Article: The Federal Reserve raised interest rates by 25 basis points on Wednesday, citing persistent inflation concerns. The decision was unanimous among the 12-member committee. Markets reacted positively, with the S&P 500 rising 1.2%...",
+      output: "The Fed raised rates 25bps unanimously amid inflation concerns; markets rose 1.2%.",
+      outputLabel: "Your summary (concise)",
+    },
+    code_generation: {
+      label: "Code Generation",
+      input: "Write a Python function that returns the nth Fibonacci number.",
+      output: "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a",
+      outputLabel: "Your code solution",
+    },
+    math_reasoning: {
+      label: "Math & Reasoning",
+      input: "A train travels 120 miles in 2 hours. What is its average speed in miles per hour?",
+      output: "60",
+      outputLabel: "Your numeric answer",
+    },
+    natural_language_inference: {
+      label: "Natural Language Inference",
+      input: "Premise: All dogs are mammals.\nHypothesis: Some mammals are dogs.",
+      output: "entailment",
+      outputLabel: "Your label (entailment / neutral / contradiction)",
+    },
+    semantic_similarity: {
+      label: "Semantic Similarity",
+      input: "Sentence 1: The car is parked outside.\nSentence 2: A vehicle is located outdoors.",
+      output: "0.91",
+      outputLabel: "Your similarity score (0.0 – 1.0)",
+    },
+    fact_verification: {
+      label: "Fact Verification",
+      input: "Claim: The Eiffel Tower was built in 1889 and is located in Paris, France.",
+      output: "SUPPORTED",
+      outputLabel: "Your verdict (SUPPORTED / REFUTED / NOT ENOUGH INFO)",
+    },
+    dialogue: {
+      label: "Dialogue",
+      input: "User: I'd like to book a table for two at 7pm tonight.\nSystem: Of course! May I have your name and preferred restaurant?",
+      output: "My name is Smith. I'd like to book at La Maison, please.",
+      outputLabel: "Your next system or user turn",
+    },
+  };
+
+  const taskExample = TASK_EXAMPLES[
+    (submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type || "").toLowerCase()
+  ] || null;
 
   const copyAllQuestions = async (format) => {
     if (!sourceSentences.length) return;
@@ -774,26 +864,38 @@ const SubmitToLeaderboard = ({
             <span className="text-xs font-bold bg-[#defe47] text-black rounded-full w-5 h-5 flex items-center justify-center shrink-0">2</span>
             <h2 className="text-base font-semibold text-white">Get Test Questions</h2>
           </div>
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-400">Questions</label>
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={count}
-                onChange={(e) => setCount(Number(e.target.value))}
-                className="w-20 px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50"
-              />
+          {/* Example answer format */}
+          {taskExample && (
+            <div className="mb-5 rounded-xl border border-gray-700 bg-gray-900/60 overflow-hidden">
+              <div className="px-4 py-2 border-b border-gray-700 bg-gray-950/60 flex items-center gap-2">
+                <span className="text-xs font-semibold text-[#defe47]">Example</span>
+                <span className="text-xs text-gray-500">— not from the eval set, shows expected answer format</span>
+              </div>
+              <div className="px-4 py-3 space-y-3">
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Input question</div>
+                  <pre className="text-sm text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{taskExample.input}</pre>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">{taskExample.outputLabel}</div>
+                  <pre className="text-sm text-[#defe47] whitespace-pre-wrap font-mono bg-black/20 rounded-lg px-3 py-2">{taskExample.output}</pre>
+                </div>
+              </div>
             </div>
+          )}
+
+          <div className="flex items-center gap-3 mb-4">
             <button
               type="button"
               onClick={fetchSentences}
               disabled={loadingFetch}
               className="px-4 py-2 rounded-lg bg-[#defe47] text-black text-sm font-semibold hover:bg-[#e8ff70] disabled:opacity-50"
             >
-              {loadingFetch ? "Fetching…" : "Fetch Questions"}
+              {loadingFetch ? "Fetching…" : "Fetch All Questions"}
             </button>
+            {selectedDatasetMeta.size && (
+              <span className="text-xs text-gray-500">{selectedDatasetMeta.size} items in this benchmark</span>
+            )}
           </div>
 
           {sourceSentences.length > 0 && (
