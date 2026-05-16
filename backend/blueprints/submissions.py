@@ -97,8 +97,7 @@ def submit_model():
             "success": False,
             "error": "sentence_ids must be a list",
         }), 400
-    elif task_type_key in ("text_classification", "named_entity_recognition", "ner"):
-        sentence_ids = list(range(len(model_results)))
+    # Do NOT override sentence_ids for any task type — respect what the caller provided.
 
     if len(model_results) != len(sentence_ids):
         return jsonify({
@@ -157,6 +156,9 @@ def submit_model():
                                 ]
                             if not reference_answers and _tt in (
                                 'chatbot', 'prompting', 'qa', 'document_qa', 'line_qa',
+                                'math_reasoning', 'multiple_choice_qa', 'natural_language_inference',
+                                'fact_verification', 'semantic_similarity', 'code_generation',
+                                'summarization', 'retrieval', 'dialogue',
                             ):
                                 reference_answers = [
                                     r.get('answer') if isinstance(r, dict) else r
@@ -199,9 +201,11 @@ def submit_model():
                             }), 400
                     reference_sentences = [references_pool[sid] for sid in sentence_ids]
                 else:
-                    reference_sentences = [
-                        _SPANISH_REFERENCES[i % len(_SPANISH_REFERENCES)] for i in sentence_ids
-                    ]
+                    return jsonify({
+                        "success": False,
+                        "error": "No reference translations found for this dataset. "
+                                 "Ensure the dataset was imported with reference data.",
+                    }), 400
             if metric is None:
                 metric = 'bertscore' if benchmark_dataset_name.endswith('_bertscore') else 'bleu'
 
@@ -317,14 +321,21 @@ def submit_model():
             try:
                 out = _persist_and_build_response()
                 with _EVAL_JOBS_LOCK:
-                    _EVAL_JOBS[job_id] = {"status": "completed", **out}
+                    created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
+                    _EVAL_JOBS[job_id] = {"status": "completed", "_created": created, **out}
             except Exception as e:
                 with _EVAL_JOBS_LOCK:
-                    _EVAL_JOBS[job_id] = {"status": "failed", "error": str(e)}
+                    created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
+                    _EVAL_JOBS[job_id] = {"status": "failed", "_created": created, "error": str(e)}
 
         job_id = str(uuid.uuid4())
+        _now = utc_now().timestamp()
         with _EVAL_JOBS_LOCK:
-            _EVAL_JOBS[job_id] = {"status": "pending"}
+            _EVAL_JOBS[job_id] = {"status": "pending", "_created": _now}
+            # Evict completed/failed jobs older than 1 hour
+            expired = [k for k, v in _EVAL_JOBS.items() if _now - v.get("_created", _now) > 3600]
+            for k in expired:
+                del _EVAL_JOBS[k]
         t = threading.Thread(target=_worker, args=(job_id,), daemon=True)
         t.start()
         resp = jsonify({"success": True, "job_id": job_id, "status": "pending"})
@@ -374,17 +385,19 @@ def my_submissions():
     sub = jwt_sub_from_request(request)
     if not sub:
         configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
-        require_key = os.getenv("REQUIRE_API_KEY", "").lower() in {"1", "true", "yes"} or bool(configured)
-        if require_key:
-            supplied = request.headers.get("X-API-Key", "")
-            if supplied not in configured:
-                return jsonify({"success": False, "error": "Unauthorized"}), 401
-        sub = (request.args.get("submitter_id") or "").strip()
+        supplied = request.headers.get("X-API-Key", "").strip()
+        # Only allow submitter_id fallback when a valid API key is presented
+        if configured and supplied in configured:
+            sub = (request.args.get("submitter_id") or "").strip()
+        elif not configured:
+            # Dev mode: no API keys configured — require JWT; reject bare submitter_id param
+            # to prevent users from peeking at each other's submissions.
+            pass
     if not sub:
         return jsonify({
             "success": False,
-            "error": "Provide a valid Bearer JWT or submitter_id query parameter (with API key if required)",
-        }), 400
+            "error": "Unauthorized — sign in (JWT) or provide a valid X-API-Key to view submissions",
+        }), 401
 
     page = max(1, int(request.args.get("page", 1)))
     page_size = min(100, max(1, int(request.args.get("page_size", 25))))

@@ -12,15 +12,39 @@ from eval_core.evaluators import get_evaluator
 
 def normalize_task_type(task_type: Optional[str]) -> str:
     if not task_type:
-        return "translation"
+        return "text_classification"
     t = str(task_type).lower().strip()
     aliases = {
         "ner": "named_entity_recognition",
         "qa": "document_qa",
         "chatbot": "document_qa",
         "prompting": "line_qa",
+        "mc": "multiple_choice_qa",
+        "multiple_choice": "multiple_choice_qa",
+        "nli": "natural_language_inference",
+        "math": "math_reasoning",
+        "code": "code_generation",
+        "summarize": "summarization",
+        "fact_check": "fact_verification",
+        "retrieval_augmented_generation": "retrieval",
+        "rag": "retrieval",
     }
     return aliases.get(t, t)
+
+
+# Task types that compare a predicted answer string against a reference answer string (accuracy).
+_ANSWER_COMPARISON_TASKS = frozenset({
+    "multiple_choice_qa",
+    "math_reasoning",
+    "natural_language_inference",
+    "fact_verification",
+    "semantic_similarity",
+    "code_generation",
+    "summarization",
+    "retrieval",
+    "dialogue",
+    "line_qa",
+})
 
 
 def normalize_eval_metric(metric: Optional[str], task_norm: str) -> str:
@@ -34,6 +58,10 @@ def normalize_eval_metric(metric: Optional[str], task_norm: str) -> str:
             return "f1"
         if task_norm == "translation":
             return "bleu"
+        if task_norm == "summarization":
+            return "rouge"
+        if task_norm in _ANSWER_COMPARISON_TASKS:
+            return "accuracy"
         return "accuracy"
     if m == "exact":
         return "exact_match"
@@ -91,8 +119,30 @@ def build_personal_eval_inputs(
             eid = str(sid)
             ground_truth.append({"id": eid, "answer": ref})
             predictions.append({"id": eid, "prediction": pred})
+    elif tt in _ANSWER_COMPARISON_TASKS:
+        # All these tasks reduce to: compare predicted string against reference answer string.
+        # reference_answers is the unified field; reference_labels is an acceptable fallback
+        # (e.g. NLI labels stored as classification labels).
+        refs = reference_answers or reference_labels
+        if not refs:
+            raise ValueError(f"missing reference answers for task {tt!r}")
+        for sid, ref, pred in zip(sentence_ids, refs, model_results):
+            eid = str(sid)
+            ref_s = ref if isinstance(ref, str) else (
+                ref[0] if isinstance(ref, (list, tuple)) and ref else str(ref)
+            )
+            ground_truth.append({"id": eid, "answer": ref_s})
+            predictions.append({"id": eid, "prediction": str(pred)})
     else:
-        raise ValueError(f"unsupported task for Personal evaluators: {tt!r}")
+        # Unknown task type — attempt a generic exact-match comparison.
+        refs = reference_answers or reference_labels or reference_translations
+        if not refs:
+            raise ValueError(f"no reference data available for task {tt!r}")
+        for sid, ref, pred in zip(sentence_ids, refs, model_results):
+            eid = str(sid)
+            ref_s = ref if isinstance(ref, str) else str(ref)
+            ground_truth.append({"id": eid, "answer": ref_s})
+            predictions.append({"id": eid, "prediction": str(pred)})
 
     primary = normalize_eval_metric(None, tt)
     return tt, primary, ground_truth, predictions

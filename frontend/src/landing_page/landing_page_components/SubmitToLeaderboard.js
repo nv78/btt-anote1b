@@ -391,9 +391,10 @@ const SubmitToLeaderboard = ({
           if (Array.isArray(parsed)) {
             parsed.forEach((item, idx) => {
               const output = item.output ?? item.prediction ?? item.translation ?? item.answer ?? item.result ?? "";
-              const id = item.id ?? item.sentence_id ?? idx;
+              const rawId = item.id ?? item.sentence_id ?? idx;
+              const numId = Number(rawId);
               modelResults.push(String(output));
-              ids.push(Number(id));
+              ids.push(isNaN(numId) ? idx : numId);
             });
           } else if (parsed.modelResults && parsed.sentence_ids) {
             modelResults = parsed.modelResults;
@@ -426,10 +427,8 @@ const SubmitToLeaderboard = ({
             rows.forEach((r, idx) => {
               const text = r.translation || r.Translations || r.output || r.prediction || r.Prediction || '';
               const sid = r.sentence_id != null ? Number(r.sentence_id) : (r.id != null ? Number(r.id) : (r.index != null ? Number(r.index) : idx));
-              if (String(text).trim().length) {
-                modelResults.push(String(text));
-                ids.push(sid);
-              }
+              modelResults.push(String(text));
+              ids.push(sid);
             });
             resolve({ modelResults, sentenceIds: ids });
           } catch (e) { reject(e); }
