@@ -1273,7 +1273,320 @@ const Leaderboard = () => {
           //     "updated": "Feb 2025"
           // }
       ]
-  }
+  },
+
+  // ── Information Extraction ──────────────────────────────────────────────
+  {
+    name: "CoNLL-2003 NER",
+    task_type: "named_entity_recognition",
+    evaluation_metric: "f1",
+    url: "https://huggingface.co/datasets/conll2003",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.934, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.928, updated: "Jan 2025" },
+      { rank: 3, model: "Llama-3.1-70B", score: 0.921, updated: "Jan 2025" },
+      { rank: 4, model: "Mistral-Large", score: 0.915, updated: "Jan 2025" },
+      { rank: 5, model: "GPT-3.5 Turbo", score: 0.908, updated: "Jan 2025" },
+    ],
+  },
+
+  // ── Medical & Pharma ────────────────────────────────────────────────────
+  {
+    name: "BC5CDR Chemical & Disease NER",
+    task_type: "named_entity_recognition",
+    evaluation_metric: "f1",
+    url: "https://huggingface.co/datasets/bigbio/bc5cdr",
+    models: [
+      { rank: 1, model: "BioMedBERT-Large", score: 0.921, updated: "Dec 2024" },
+      { rank: 2, model: "PubMedBERT", score: 0.914, updated: "Dec 2024" },
+      { rank: 3, model: "GPT-4o", score: 0.897, updated: "Dec 2024" },
+      { rank: 4, model: "BioBERT-v1.2", score: 0.893, updated: "Dec 2024" },
+    ],
+  },
+  {
+    name: "PubMedQA - Biomedical Q&A",
+    task_type: "document_qa",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/qiaojin/PubMedQA",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.793, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.781, updated: "Jan 2025" },
+      { rank: 3, model: "MedPaLM-2", score: 0.768, updated: "Jan 2025" },
+      { rank: 4, model: "Llama-3.1-70B", score: 0.752, updated: "Jan 2025" },
+    ],
+  },
+  {
+    name: "MedMCQA - Medical Multiple Choice",
+    task_type: "multiple_choice_qa",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/medmcqa",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.732, updated: "Feb 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.718, updated: "Feb 2025" },
+      { rank: 3, model: "Gemini 1.5 Pro", score: 0.701, updated: "Feb 2025" },
+      { rank: 4, model: "Llama-3.1-70B", score: 0.688, updated: "Feb 2025" },
+    ],
+  },
+
+  // ── Legal ───────────────────────────────────────────────────────────────
+  {
+    name: "CUAD - Contract Understanding",
+    task_type: "document_qa",
+    evaluation_metric: "f1",
+    url: "https://huggingface.co/datasets/theatticusproject/cuad",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.524, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.512, updated: "Jan 2025" },
+      { rank: 3, model: "DeBERTa-v3-Large", score: 0.487, updated: "Jan 2025" },
+      { rank: 4, model: "GPT-3.5 Turbo", score: 0.461, updated: "Jan 2025" },
+    ],
+  },
+  {
+    name: "ECtHR - Legal Judgment Prediction",
+    task_type: "text_classification",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/ecthr_cases",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.761, updated: "Dec 2024" },
+      { rank: 2, model: "Legal-BERT", score: 0.748, updated: "Dec 2024" },
+      { rank: 3, model: "Claude 3.5 Sonnet", score: 0.735, updated: "Dec 2024" },
+      { rank: 4, model: "Llama-3.1-70B", score: 0.712, updated: "Dec 2024" },
+    ],
+  },
+
+  // ── Code & Math ─────────────────────────────────────────────────────────
+  {
+    name: "HumanEval - Code Generation",
+    task_type: "code_generation",
+    evaluation_metric: "pass@1",
+    url: "https://huggingface.co/datasets/openai/openai_humaneval",
+    models: [
+      { rank: 1, model: "Claude 3.5 Sonnet", score: 0.921, updated: "Mar 2025" },
+      { rank: 2, model: "GPT-4o", score: 0.902, updated: "Mar 2025" },
+      { rank: 3, model: "DeepSeek-Coder-33B", score: 0.879, updated: "Mar 2025" },
+      { rank: 4, model: "Llama-3.1-70B", score: 0.721, updated: "Mar 2025" },
+      { rank: 5, model: "CodeLlama-70B", score: 0.534, updated: "Mar 2025" },
+    ],
+  },
+  {
+    name: "GSM8K - Grade School Math",
+    task_type: "math_reasoning",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/gsm8k",
+    models: [
+      { rank: 1, model: "GPT-o1", score: 0.972, updated: "Feb 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.968, updated: "Feb 2025" },
+      { rank: 3, model: "GPT-4o", score: 0.954, updated: "Feb 2025" },
+      { rank: 4, model: "Gemini Ultra", score: 0.943, updated: "Feb 2025" },
+      { rank: 5, model: "Llama-3.1-70B", score: 0.931, updated: "Feb 2025" },
+    ],
+  },
+
+  // ── News & Journalism ───────────────────────────────────────────────────
+  {
+    name: "CNN/DailyMail - Summarization",
+    task_type: "summarization",
+    evaluation_metric: "rouge_l",
+    url: "https://huggingface.co/datasets/cnn_dailymail",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.213, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.209, updated: "Jan 2025" },
+      { rank: 3, model: "Llama-3.1-70B", score: 0.198, updated: "Jan 2025" },
+      { rank: 4, model: "Falcon-180B", score: 0.187, updated: "Jan 2025" },
+    ],
+  },
+  {
+    name: "FEVER - Fact Verification",
+    task_type: "fact_verification",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/fever",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.891, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.883, updated: "Jan 2025" },
+      { rank: 3, model: "Llama-3.1-70B", score: 0.871, updated: "Jan 2025" },
+      { rank: 4, model: "DeBERTa-v3-Large", score: 0.866, updated: "Jan 2025" },
+    ],
+  },
+
+  // ── General NLP ─────────────────────────────────────────────────────────
+  {
+    name: "SNLI - Natural Language Inference",
+    task_type: "natural_language_inference",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/snli",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.942, updated: "Dec 2024" },
+      { rank: 2, model: "DeBERTa-v3-Large", score: 0.936, updated: "Dec 2024" },
+      { rank: 3, model: "Claude 3.5 Sonnet", score: 0.929, updated: "Dec 2024" },
+      { rank: 4, model: "Llama-3.1-70B", score: 0.918, updated: "Dec 2024" },
+      { rank: 5, model: "RoBERTa-Large", score: 0.912, updated: "Dec 2024" },
+    ],
+  },
+  {
+    name: "STS-B - Semantic Textual Similarity",
+    task_type: "semantic_similarity",
+    evaluation_metric: "spearman",
+    url: "https://huggingface.co/datasets/mteb/stsbenchmark-sts",
+    models: [
+      { rank: 1, model: "SimCSE-RoBERTa", score: 0.934, updated: "Dec 2024" },
+      { rank: 2, model: "GPT-4o", score: 0.928, updated: "Dec 2024" },
+      { rank: 3, model: "E5-Large-v2", score: 0.921, updated: "Dec 2024" },
+      { rank: 4, model: "BGE-Large-EN", score: 0.918, updated: "Dec 2024" },
+      { rank: 5, model: "sentence-t5-xxl", score: 0.912, updated: "Dec 2024" },
+    ],
+  },
+  {
+    name: "HellaSwag - Commonsense Text Completion",
+    task_type: "text_generation",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/Rowan/hellaswag",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.962, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.951, updated: "Jan 2025" },
+      { rank: 3, model: "Llama-3.1-70B", score: 0.943, updated: "Jan 2025" },
+      { rank: 4, model: "Mistral-Large", score: 0.934, updated: "Jan 2025" },
+      { rank: 5, model: "Mistral-7B", score: 0.814, updated: "Jan 2025" },
+    ],
+  },
+
+  // ── Social Media ────────────────────────────────────────────────────────
+  {
+    name: "TweetEval - Twitter Sentiment",
+    task_type: "text_classification",
+    evaluation_metric: "f1",
+    url: "https://huggingface.co/datasets/tweet_eval",
+    models: [
+      { rank: 1, model: "RoBERTa-Twitter", score: 0.734, updated: "Nov 2024" },
+      { rank: 2, model: "GPT-4o", score: 0.721, updated: "Nov 2024" },
+      { rank: 3, model: "BERTweet-Large", score: 0.713, updated: "Nov 2024" },
+      { rank: 4, model: "Claude 3.5 Sonnet", score: 0.698, updated: "Nov 2024" },
+    ],
+  },
+  {
+    name: "WNUT-17 - Emerging Entity NER",
+    task_type: "named_entity_recognition",
+    evaluation_metric: "f1",
+    url: "https://huggingface.co/datasets/wnut_17",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.591, updated: "Nov 2024" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.582, updated: "Nov 2024" },
+      { rank: 3, model: "BERTweet-Large", score: 0.571, updated: "Nov 2024" },
+      { rank: 4, model: "RoBERTa-Large", score: 0.558, updated: "Nov 2024" },
+    ],
+  },
+
+  // ── Customer Support ────────────────────────────────────────────────────
+  {
+    name: "MultiWOZ - Task-Oriented Dialogue",
+    task_type: "dialogue",
+    evaluation_metric: "inform_rate",
+    url: "https://huggingface.co/datasets/multi_woz_v22",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.943, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.931, updated: "Jan 2025" },
+      { rank: 3, model: "Llama-3.1-70B", score: 0.918, updated: "Jan 2025" },
+      { rank: 4, model: "SimpleTOD", score: 0.891, updated: "Jan 2025" },
+    ],
+  },
+
+  // ── Retrieval / RAG ─────────────────────────────────────────────────────
+  {
+    name: "MS MARCO - Passage Retrieval",
+    task_type: "retrieval",
+    evaluation_metric: "mrr@10",
+    url: "https://huggingface.co/datasets/ms_marco",
+    models: [
+      { rank: 1, model: "E5-Large-v2", score: 0.421, updated: "Dec 2024" },
+      { rank: 2, model: "BGE-Large-EN", score: 0.418, updated: "Dec 2024" },
+      { rank: 3, model: "Contriever-MSMARCO", score: 0.398, updated: "Dec 2024" },
+      { rank: 4, model: "BM25", score: 0.371, updated: "Dec 2024" },
+    ],
+  },
+
+  // ── Multilingual ────────────────────────────────────────────────────────
+  {
+    name: "XNLI - Cross-Lingual NLI",
+    task_type: "natural_language_inference",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/xnli",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.873, updated: "Dec 2024" },
+      { rank: 2, model: "mDeBERTa-v3-Base", score: 0.861, updated: "Dec 2024" },
+      { rank: 3, model: "Claude 3.5 Sonnet", score: 0.849, updated: "Dec 2024" },
+      { rank: 4, model: "XLM-RoBERTa-Large", score: 0.834, updated: "Dec 2024" },
+      { rank: 5, model: "mBERT", score: 0.812, updated: "Dec 2024" },
+    ],
+  },
+
+  // ── Education ───────────────────────────────────────────────────────────
+  {
+    name: "SciQ - Science Multiple Choice",
+    task_type: "multiple_choice_qa",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/allenai/sciq",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.971, updated: "Nov 2024" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.963, updated: "Nov 2024" },
+      { rank: 3, model: "Llama-3.1-70B", score: 0.948, updated: "Nov 2024" },
+      { rank: 4, model: "GPT-3.5 Turbo", score: 0.921, updated: "Nov 2024" },
+    ],
+  },
+
+  // ── Cybersecurity ───────────────────────────────────────────────────────
+  {
+    name: "CyberThreat - Malware Classification",
+    task_type: "text_classification",
+    evaluation_metric: "accuracy",
+    url: "https://huggingface.co/datasets/kasrahabib/cyber_threat_intelligence",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.891, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.874, updated: "Jan 2025" },
+      { rank: 3, model: "SecBERT", score: 0.862, updated: "Jan 2025" },
+      { rank: 4, model: "Llama-3.1-70B", score: 0.843, updated: "Jan 2025" },
+    ],
+  },
+
+  // ── Finance (Summarization) ─────────────────────────────────────────────
+  {
+    name: "ECTSum - Earnings Call Summarization",
+    task_type: "summarization",
+    evaluation_metric: "rouge_l",
+    url: "https://huggingface.co/datasets/mrSoul7766/ECTSum",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.318, updated: "Jan 2025" },
+      { rank: 2, model: "Claude 3.5 Sonnet", score: 0.311, updated: "Jan 2025" },
+      { rank: 3, model: "Llama-3.1-70B", score: 0.298, updated: "Jan 2025" },
+      { rank: 4, model: "BART-Large-CNN", score: 0.287, updated: "Jan 2025" },
+    ],
+  },
+
+  // ── HR & Recruiting ─────────────────────────────────────────────────────
+  {
+    name: "Resume NER - Skills & Entities",
+    task_type: "named_entity_recognition",
+    evaluation_metric: "f1",
+    url: "https://huggingface.co/datasets/dataminr/resume-ner",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.923, updated: "Nov 2024" },
+      { rank: 2, model: "RoBERTa-Large", score: 0.912, updated: "Nov 2024" },
+      { rank: 3, model: "Claude 3.5 Sonnet", score: 0.904, updated: "Nov 2024" },
+      { rank: 4, model: "BERT-Large", score: 0.891, updated: "Nov 2024" },
+    ],
+  },
+
+  // ── Climate & Energy ────────────────────────────────────────────────────
+  {
+    name: "ClimaText - Climate Claim Detection",
+    task_type: "text_classification",
+    evaluation_metric: "f1",
+    url: "https://huggingface.co/datasets/climatebert/climate_detection",
+    models: [
+      { rank: 1, model: "GPT-4o", score: 0.878, updated: "Dec 2024" },
+      { rank: 2, model: "ClimateBERT", score: 0.861, updated: "Dec 2024" },
+      { rank: 3, model: "Claude 3.5 Sonnet", score: 0.854, updated: "Dec 2024" },
+      { rank: 4, model: "RoBERTa-Large", score: 0.839, updated: "Dec 2024" },
+    ],
+  },
   ];
   const navigate = useNavigate();
 
