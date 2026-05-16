@@ -832,3 +832,370 @@ def update_submission_visibility(submission_id: int):
         return jsonify({"success": False, "error": "Forbidden"}), 403
     sub_row["is_public"] = is_public
     return jsonify({"success": True, "submission_id": submission_id, "is_public": bool(is_public)})
+
+
+# ── LLM runner ───────────────────────────────────────────────────────────────
+
+def _call_llm(provider: str, model_id: str, api_key: Optional[str], prompt: str) -> str:
+    """Call an LLM provider and return raw text response."""
+    if provider == "openai":
+        try:
+            from openai import OpenAI  # type: ignore
+        except ImportError:
+            raise RuntimeError("openai package not installed — pip install openai")
+        key = api_key or os.getenv("OPENAI_API_KEY") or ""
+        if not key:
+            raise RuntimeError("No OpenAI API key provided")
+        client = OpenAI(api_key=key)
+        r = client.chat.completions.create(
+            model=model_id or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant. Return ONLY valid JSON, no explanation, no markdown fences."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+        )
+        return r.choices[0].message.content or ""
+
+    if provider == "anthropic":
+        try:
+            import anthropic as _ant  # type: ignore
+        except ImportError:
+            raise RuntimeError("anthropic package not installed — pip install anthropic")
+        key = api_key or os.getenv("ANTHROPIC_API_KEY") or ""
+        if not key:
+            raise RuntimeError("No Anthropic API key provided")
+        client = _ant.Anthropic(api_key=key)
+        r = client.messages.create(
+            model=model_id or "claude-3-5-haiku-20241022",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+            system="You are a helpful assistant. Return ONLY valid JSON, no explanation, no markdown fences.",
+        )
+        return r.content[0].text  # type: ignore[attr-defined]
+
+    if provider == "google":
+        try:
+            import google.generativeai as genai  # type: ignore
+        except ImportError:
+            raise RuntimeError("google-generativeai package not installed — pip install google-generativeai")
+        key = api_key or os.getenv("GOOGLE_API_KEY") or ""
+        if not key:
+            raise RuntimeError("No Google API key provided")
+        genai.configure(api_key=key)
+        model = genai.GenerativeModel(model_id or "gemini-1.5-flash")
+        r = model.generate_content(
+            f"You are a helpful assistant. Return ONLY valid JSON, no explanation, no markdown fences.\n\n{prompt}"
+        )
+        return getattr(r, "text", None) or ""
+
+    if provider == "ollama":
+        import urllib.request as _req
+        base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+        payload_bytes = json.dumps({
+            "model": model_id or "llama3",
+            "prompt": f"You are a helpful assistant. Return ONLY valid JSON, no explanation, no markdown fences.\n\n{prompt}",
+            "stream": False,
+        }).encode()
+        req = _req.Request(f"{base}/api/generate", data=payload_bytes, headers={"Content-Type": "application/json"})
+        with _req.urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read()).get("response", "")
+
+    raise RuntimeError(f"Unknown provider: {provider!r}")
+
+
+def _parse_llm_json_response(text: str, expected_ids: List[int]) -> List[str]:
+    """Extract ordered list of prediction strings from LLM JSON output."""
+    # Strip markdown code fences
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+    try:
+        parsed = json.loads(stripped)
+    except Exception:
+        # Try to extract JSON array substring
+        start = stripped.find("[")
+        end = stripped.rfind("]")
+        if start != -1 and end != -1:
+            try:
+                parsed = json.loads(stripped[start:end + 1])
+            except Exception:
+                raise ValueError(f"Could not parse LLM response as JSON: {stripped[:200]}")
+        else:
+            raise ValueError(f"LLM did not return a JSON array: {stripped[:200]}")
+
+    if not isinstance(parsed, list):
+        raise ValueError("LLM response is not a JSON array")
+
+    id_to_output: dict = {}
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        raw_id = item.get("id") if "id" in item else None
+        output = item.get("output") or item.get("prediction") or item.get("answer") or item.get("translation") or ""
+        if raw_id is not None:
+            try:
+                id_to_output[int(raw_id)] = str(output)
+            except (ValueError, TypeError):
+                pass
+
+    # Return in expected_ids order; fall back to positional if ids don't match
+    results = []
+    for i, eid in enumerate(expected_ids):
+        if eid in id_to_output:
+            results.append(id_to_output[eid])
+        elif i < len(parsed):
+            item = parsed[i]
+            fallback = (item.get("output") or item.get("prediction") or item.get("answer") or "") if isinstance(item, dict) else str(item)
+            results.append(str(fallback))
+        else:
+            results.append("")
+    return results
+
+
+def _build_batch_prompt(task_type: str, batch_items: List[dict]) -> str:
+    """Build a task-appropriate prompt for a batch of items."""
+    from eval_core.leaderboard_bridge import normalize_task_type  # type: ignore
+    tt = normalize_task_type(task_type)
+
+    header_map = {
+        "text_classification": (
+            "Classify each text. Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<label>\"}, ...]"
+        ),
+        "named_entity_recognition": (
+            "Extract named entities (people, orgs, locations, etc.) from each text.\n"
+            "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"Entity One; Entity Two\"}, ...]\n"
+            "If no entities, use empty string."
+        ),
+        "document_qa": (
+            "Answer each question with a short exact span from the context.\n"
+            "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<answer>\"}, ...]"
+        ),
+        "line_qa": (
+            "Answer each question concisely.\n"
+            "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<answer>\"}, ...]"
+        ),
+        "multiple_choice_qa": (
+            "Choose the correct option letter (A, B, C, D, …) for each question.\n"
+            "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<letter>\"}, ...]"
+        ),
+        "natural_language_inference": (
+            "Classify each premise-hypothesis pair as entailment, neutral, or contradiction.\n"
+            "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"entailment|neutral|contradiction\"}, ...]"
+        ),
+        "math_reasoning": (
+            "Solve each math problem. Output ONLY the final numeric answer (digits and decimal point only, no units).\n"
+            "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<number>\"}, ...]"
+        ),
+        "summarization": (
+            "Write a one-sentence summary for each document.\n"
+            "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<summary>\"}, ...]"
+        ),
+        "translation": (
+            "Translate each text. Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<translation>\"}, ...]"
+        ),
+    }
+    instruction = header_map.get(tt, (
+        "Complete the task for each item.\n"
+        "Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<answer>\"}, ...]"
+    ))
+
+    lines = [instruction, "", "Items:"]
+    for item in batch_items:
+        lines.append(f"[{item['id']}] {item['text']}")
+    return "\n".join(lines)
+
+
+@bp.post("/public/run_llm_submission")
+@rate_limit("SUBMIT_MODEL_RATE_LIMIT", "10/minute")
+@require_api_key
+def run_llm_submission():
+    """Run an LLM against a benchmark dataset and auto-submit the results.
+
+    Body:
+    {
+      "benchmarkDatasetName": "GLUE SST-2 - Sentiment Classification",
+      "modelName": "gpt-4o-mini",
+      "provider": "openai",          // openai | anthropic | google | ollama
+      "model_id": "gpt-4o-mini",
+      "api_key": "sk-...",           // optional — falls back to server env var
+      "batch_size": 20,              // default 20
+      "is_public": true,
+      "submittedBy": "you@email.com"
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        benchmark_name = validate_text(data.get("benchmarkDatasetName"), "benchmarkDatasetName")
+        model_name = validate_text(data.get("modelName"), "modelName")
+        submitted_by = validate_text(data.get("submittedBy", "public@anote.ai"), "submittedBy", 255)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    provider = str(data.get("provider") or "openai").lower().strip()
+    model_id = str(data.get("model_id") or data.get("modelId") or "").strip()
+    user_api_key = str(data.get("api_key") or data.get("apiKey") or "").strip() or None
+    batch_size = max(1, min(100, int(data.get("batch_size", 20))))
+    is_public = 0 if str(data.get("is_public", True)).lower() in ("false", "0", "no", "private") else 1
+    submitter_id = resolve_submitter_id(request, data)
+
+    # Load dataset
+    dataset = None
+    conn_d, cursor_d = get_db_connection()
+    if conn_d and cursor_d:
+        try:
+            cursor_d.execute(
+                "SELECT id, task_type, evaluation_metric, reference_data FROM benchmark_datasets WHERE name = %s",
+                (benchmark_name,),
+            )
+            dataset = cursor_d.fetchone()
+        finally:
+            try:
+                cursor_d.close()
+                conn_d.close()
+            except Exception:
+                pass
+    if not dataset:
+        dataset = next((d for d in _STORE["datasets"] if d.get("name") == benchmark_name), None)
+    if not dataset:
+        return jsonify({"success": False, "error": f"Dataset not found: {benchmark_name!r}"}), 404
+
+    try:
+        rd = json.loads(dataset["reference_data"]) if isinstance(dataset["reference_data"], str) else dataset["reference_data"]
+    except Exception:
+        rd = {}
+
+    source_texts = rd.get("source_texts") or []
+    if not source_texts:
+        return jsonify({"success": False, "error": "Dataset has no source_texts — cannot run LLM"}), 400
+
+    task_type = dataset.get("task_type") or "text_classification"
+    n = len(source_texts)
+    all_ids = list(range(n))
+
+    def _worker(job_id: str):
+        try:
+            all_predictions: List[str] = [""] * n
+            total_batches = (n + batch_size - 1) // batch_size
+            for b_idx in range(total_batches):
+                start = b_idx * batch_size
+                end = min(start + batch_size, n)
+                batch_ids = all_ids[start:end]
+                batch_texts = source_texts[start:end]
+                batch_items = [{"id": bid, "text": txt} for bid, txt in zip(batch_ids, batch_texts)]
+                prompt = _build_batch_prompt(task_type, batch_items)
+                raw = _call_llm(provider, model_id, user_api_key, prompt)
+                preds = _parse_llm_json_response(raw, batch_ids)
+                for i, pred in enumerate(preds):
+                    all_predictions[start + i] = pred
+                with _EVAL_JOBS_LOCK:
+                    _EVAL_JOBS[job_id]["batches_done"] = b_idx + 1
+                    _EVAL_JOBS[job_id]["total_batches"] = total_batches
+
+            # Evaluate
+            try:
+                from eval_core.leaderboard_bridge import run_personal_eval, normalize_eval_metric, normalize_task_type  # type: ignore
+            except ImportError:
+                from backend.eval_core.leaderboard_bridge import run_personal_eval, normalize_eval_metric, normalize_task_type  # type: ignore
+
+            # Build reference lists by walking ground_truth
+            gt_list = rd.get("ground_truth") or []
+            reference_labels = rd.get("labels") or ([gt_list[i].get("answer") if isinstance(gt_list[i], dict) else gt_list[i] for i in all_ids if i < len(gt_list)] if gt_list else None)
+            reference_entities = rd.get("entities") or None
+            reference_answers = rd.get("answers") or ([gt_list[i].get("answer") if isinstance(gt_list[i], dict) else gt_list[i] for i in all_ids if i < len(gt_list)] if gt_list and task_type not in ("text_classification",) else None)
+            reference_translations = rd.get("reference_translations") or None
+
+            tt = normalize_task_type(task_type)
+            if tt == "text_classification":
+                reference_answers = None
+            elif tt in ("named_entity_recognition", "ner"):
+                reference_labels = None
+                reference_answers = None
+
+            score, detailed_scores = run_personal_eval(
+                task_type,
+                dataset.get("evaluation_metric"),
+                all_ids,
+                reference_labels,
+                reference_entities,
+                reference_answers,
+                reference_translations,
+                all_predictions,
+            )
+            metric = normalize_eval_metric(dataset.get("evaluation_metric"), tt)
+            eval_details = {"metric": metric, "detailed_scores": detailed_scores}
+
+            # Persist
+            submission_id = None
+            conn_w, cursor_w = get_db_connection()
+            if conn_w and cursor_w:
+                try:
+                    cursor_w.execute("SELECT id FROM benchmark_datasets WHERE name = %s", (benchmark_name,))
+                    row = cursor_w.fetchone()
+                    if row:
+                        dataset_id = row["id"]
+                        try:
+                            cursor_w.execute(
+                                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, submitter_id, model_results, is_public) "
+                                "VALUES (%s, %s, %s, %s, %s, %s)",
+                                (dataset_id, model_name, submitted_by, submitter_id, json.dumps(all_predictions), is_public),
+                            )
+                        except Exception:
+                            cursor_w.execute(
+                                "INSERT INTO model_submissions (benchmark_dataset_id, model_name, submitted_by, model_results) "
+                                "VALUES (%s, %s, %s, %s)",
+                                (dataset_id, model_name, submitted_by, json.dumps(all_predictions)),
+                            )
+                        submission_id = cursor_w.lastrowid
+                        cursor_w.execute(
+                            "INSERT INTO evaluation_results (model_submission_id, score, evaluation_details) VALUES (%s, %s, %s)",
+                            (submission_id, float(score), json.dumps(eval_details)),
+                        )
+                        conn_w.commit()
+                finally:
+                    try:
+                        cursor_w.close()
+                        conn_w.close()
+                    except Exception:
+                        pass
+
+            with _EVAL_JOBS_LOCK:
+                created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
+                _EVAL_JOBS[job_id] = {
+                    "status": "completed",
+                    "_created": created,
+                    "success": True,
+                    "submission_id": submission_id,
+                    "score": float(score),
+                    "metric": metric,
+                    "detailed_scores": detailed_scores,
+                    "total_questions": n,
+                }
+        except Exception as e:
+            with _EVAL_JOBS_LOCK:
+                created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
+                _EVAL_JOBS[job_id] = {"status": "failed", "_created": created, "error": str(e)}
+
+    job_id = str(uuid.uuid4())
+    _now = utc_now().timestamp()
+    with _EVAL_JOBS_LOCK:
+        _EVAL_JOBS[job_id] = {
+            "status": "pending", "_created": _now,
+            "batches_done": 0, "total_batches": (n + batch_size - 1) // batch_size,
+            "total_questions": n,
+        }
+        expired = [k for k, v in _EVAL_JOBS.items() if _now - v.get("_created", _now) > 3600]
+        for k in expired:
+            del _EVAL_JOBS[k]
+
+    t = threading.Thread(target=_worker, args=(job_id,), daemon=True)
+    t.start()
+    return jsonify({
+        "success": True,
+        "job_id": job_id,
+        "status": "pending",
+        "total_questions": n,
+        "total_batches": (n + batch_size - 1) // batch_size,
+    }), 202

@@ -71,9 +71,21 @@ const SubmitToLeaderboard = ({
   const [submissionFormatOpen, setSubmissionFormatOpen] = useState(false);
   const [copiedFormat, setCopiedFormat] = useState(false);
   const [dsSearch, setDsSearch] = useState("");
-  const [submitMode, setSubmitMode] = useState("manual"); // 'manual' | 'csv' | 'json'
+  const [submitMode, setSubmitMode] = useState("manual"); // 'manual' | 'csv' | 'json' | 'llm'
   const [copiedQuestions, setCopiedQuestions] = useState(""); // '' | 'text' | 'json'
   const [isPublic, setIsPublic] = useState(true);
+  const [showPromptPanel, setShowPromptPanel] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+
+  // LLM runner state
+  const [llmProvider, setLlmProvider] = useState(() => localStorage.getItem("llm_provider") || "openai");
+  const [llmModelId, setLlmModelId] = useState(() => localStorage.getItem("llm_model_id") || "");
+  const [llmApiKey, setLlmApiKey] = useState(() => localStorage.getItem("llm_api_key") || "");
+  const [llmBatchSize, setLlmBatchSize] = useState(20);
+  const [llmJobId, setLlmJobId] = useState(null);
+  const [llmJobStatus, setLlmJobStatus] = useState(null); // null | {status, batches_done, total_batches, score, ...}
+  const [llmRunning, setLlmRunning] = useState(false);
+  const [llmError, setLlmError] = useState("");
 
   useEffect(() => {
     localStorage.setItem("leaderboard_api_key", apiKey);
@@ -81,6 +93,9 @@ const SubmitToLeaderboard = ({
   useEffect(() => {
     localStorage.setItem("leaderboard_submitter_id", submitterId);
   }, [submitterId]);
+  useEffect(() => { localStorage.setItem("llm_provider", llmProvider); }, [llmProvider]);
+  useEffect(() => { localStorage.setItem("llm_model_id", llmModelId); }, [llmModelId]);
+  useEffect(() => { localStorage.setItem("llm_api_key", llmApiKey); }, [llmApiKey]);
 
   const buildHeaders = (json = true) => {
     const h = {};
@@ -381,6 +396,114 @@ const SubmitToLeaderboard = ({
       setCopiedQuestions(format);
       setTimeout(() => setCopiedQuestions(""), 1500);
     } catch {}
+  };
+
+  // ── LLM prompt builder ────────────────────────────────────────────────────
+
+  const buildLlmPrompt = () => {
+    if (!sourceSentences.length) return "";
+    const tt = (submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type || "").toLowerCase();
+    const instructions = {
+      text_classification:
+        "Classify each text. Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<label>\"}, ...]\nNo explanation. No markdown.",
+      named_entity_recognition:
+        "Extract named entities (people, organizations, locations) from each text.\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"Entity One; Entity Two\"}, ...]\nIf none, use empty string.",
+      document_qa:
+        "Answer each question with a short exact span from the provided context.\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"<answer>\"}, ...]",
+      line_qa:
+        "Answer each question concisely and accurately.\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"<answer>\"}, ...]",
+      multiple_choice_qa:
+        "Select the correct option letter (A, B, C, D…) for each question.\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"<letter>\"}, ...]",
+      natural_language_inference:
+        "Classify each premise-hypothesis pair as entailment, neutral, or contradiction.\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"entailment|neutral|contradiction\"}, ...]",
+      math_reasoning:
+        "Solve each math problem. Output ONLY the final numeric answer (digits only, no units, no work shown).\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"<number>\"}, ...]",
+      summarization:
+        "Write a concise one-sentence summary of each text.\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"<summary>\"}, ...]",
+      translation:
+        "Translate each text to the target language.\nReturn ONLY a JSON array: [{\"id\": <n>, \"output\": \"<translation>\"}, ...]",
+    };
+    const instruction = instructions[tt] ||
+      "Complete the task for each item. Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<answer>\"}, ...]";
+
+    const items = sourceSentences.map((s, i) => `[${sentenceIds[i]}] ${s}`).join("\n");
+    return `${instruction}\n\nItems:\n${items}`;
+  };
+
+  const copyLlmPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(buildLlmPrompt());
+      setCopiedPrompt(true);
+      setTimeout(() => setCopiedPrompt(false), 1500);
+    } catch {}
+  };
+
+  // ── Run with LLM ──────────────────────────────────────────────────────────
+
+  const DEFAULT_MODELS = {
+    openai: "gpt-4o-mini",
+    anthropic: "claude-3-5-haiku-20241022",
+    google: "gemini-1.5-flash",
+    ollama: "llama3",
+  };
+
+  const runLlm = async () => {
+    if (!datasetKey || !modelNameInput.trim()) {
+      setLlmError("Set a model name and select a dataset first.");
+      return;
+    }
+    setLlmRunning(true);
+    setLlmError("");
+    setLlmJobStatus(null);
+    setLlmJobId(null);
+    try {
+      const jwt = getLeaderboardJwt ? getLeaderboardJwt() : null;
+      const headers = { "Content-Type": "application/json" };
+      if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
+      if (apiKey.trim()) headers["X-API-Key"] = apiKey.trim();
+
+      const res = await fetch(`${API_BASE}/public/run_llm_submission`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          benchmarkDatasetName: datasetKey,
+          modelName: modelNameInput.trim(),
+          provider: llmProvider,
+          model_id: llmModelId.trim() || DEFAULT_MODELS[llmProvider] || "",
+          api_key: llmApiKey.trim() || undefined,
+          batch_size: llmBatchSize,
+          is_public: isPublic,
+          submittedBy: submitterId.trim() || undefined,
+          submitter_id: submitterId.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "Failed to start LLM run");
+
+      const jid = data.job_id;
+      setLlmJobId(jid);
+      setLlmJobStatus({ status: "pending", batches_done: 0, total_batches: data.total_batches, total_questions: data.total_questions });
+
+      // Poll
+      for (let attempt = 0; attempt < 600; attempt++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const pollRes = await fetch(`${API_BASE}/public/eval_jobs/${jid}`);
+        const pollData = await pollRes.json();
+        setLlmJobStatus(pollData);
+        if (pollData.status === "completed") {
+          setSubmitResult({ score: pollData.score, metric: pollData.metric, detailed_scores: pollData.detailed_scores, submission_id: pollData.submission_id });
+          break;
+        }
+        if (pollData.status === "failed") {
+          setLlmError(pollData.error || "LLM run failed");
+          break;
+        }
+      }
+    } catch (e) {
+      setLlmError(e.message || "Error");
+    } finally {
+      setLlmRunning(false);
+    }
   };
 
   const parseSubmissionJson = async (file) => {
@@ -950,6 +1073,42 @@ const SubmitToLeaderboard = ({
               <p className="text-xs text-gray-500">
                 Fill in your model's answers below, then submit. The <code className="text-gray-400">output</code> field maps to your prediction for each question id.
               </p>
+
+              {/* LLM prompt panel */}
+              <div className="mt-4 rounded-xl border border-gray-700 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowPromptPanel((v) => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-300 hover:bg-white/[0.02]"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="text-[#defe47] font-mono text-xs">✦</span>
+                    <span>LLM prompt</span>
+                    <span className="text-xs text-gray-500">— copy and paste into ChatGPT, Claude.ai, etc.</span>
+                  </span>
+                  <span className="text-[#defe47] text-xs">{showPromptPanel ? "Hide" : "Show"}</span>
+                </button>
+                {showPromptPanel && (
+                  <div className="border-t border-gray-700 p-4">
+                    <div className="flex justify-end mb-2">
+                      <button
+                        type="button"
+                        onClick={copyLlmPrompt}
+                        className="text-xs px-3 py-1.5 rounded-md border border-[#defe47]/40 text-[#defe47] hover:bg-[#defe47]/10"
+                      >
+                        {copiedPrompt ? "Copied!" : "Copy prompt"}
+                      </button>
+                    </div>
+                    <pre className="text-xs text-gray-300 bg-[#111827] border border-gray-800 rounded-lg p-3 overflow-auto max-h-72 whitespace-pre-wrap">
+                      {buildLlmPrompt()}
+                    </pre>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Paste this into your LLM. It will return a JSON array — upload that using the <strong className="text-gray-300">JSON</strong> tab below,
+                      or use <strong className="text-gray-300">Run with LLM</strong> to have us call the API for you automatically.
+                    </p>
+                  </div>
+                )}
+              </div>
             </>
           )}
 
@@ -1034,14 +1193,16 @@ const SubmitToLeaderboard = ({
           </div>
 
           {/* Mode tabs */}
-          <div className="flex gap-1 mb-4 bg-gray-900 rounded-lg p-1 w-fit">
-            {[["manual", "Manual"], ["csv", "Upload CSV"], ["json", "Upload JSON"]].map(([mode, label]) => (
+          <div className="flex flex-wrap gap-1 mb-4 bg-gray-900 rounded-lg p-1 w-fit">
+            {[["manual", "Manual"], ["csv", "Upload CSV"], ["json", "Upload JSON"], ["llm", "✦ Run with LLM"]].map(([mode, label]) => (
               <button
                 key={mode}
                 type="button"
                 onClick={() => setSubmitMode(mode)}
                 className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  submitMode === mode ? "bg-[#defe47] text-black" : "text-gray-400 hover:text-white"
+                  submitMode === mode
+                    ? mode === "llm" ? "bg-[#defe47] text-black" : "bg-[#defe47] text-black"
+                    : "text-gray-400 hover:text-white"
                 }`}
               >
                 {label}
@@ -1198,13 +1359,132 @@ const SubmitToLeaderboard = ({
             </div>
           )}
 
+          {/* ── Run with LLM tab ── */}
+          {submitMode === "llm" && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-400">
+                We'll call the LLM API on your behalf in batches, score the results, and submit automatically. Your API key is sent directly to the provider and never stored.
+              </p>
+
+              {/* Provider + model */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">Provider</label>
+                  <select
+                    value={llmProvider}
+                    onChange={(e) => { setLlmProvider(e.target.value); setLlmModelId(""); }}
+                    className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm"
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google (Gemini)</option>
+                    <option value="ollama">Ollama (local)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">
+                    Model ID <span className="text-gray-600">— leave blank for default</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={{ openai: "gpt-4o-mini", anthropic: "claude-3-5-haiku-20241022", google: "gemini-1.5-flash", ollama: "llama3" }[llmProvider]}
+                    value={llmModelId}
+                    onChange={(e) => setLlmModelId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50"
+                  />
+                </div>
+              </div>
+
+              {/* API key */}
+              {llmProvider !== "ollama" && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">
+                    API key <span className="text-gray-600">— or set {llmProvider === "openai" ? "OPENAI_API_KEY" : llmProvider === "anthropic" ? "ANTHROPIC_API_KEY" : "GOOGLE_API_KEY"} on the server</span>
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="sk-..."
+                    value={llmApiKey}
+                    onChange={(e) => setLlmApiKey(e.target.value)}
+                    className="w-full sm:w-96 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50"
+                  />
+                </div>
+              )}
+
+              {/* Batch size */}
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5">
+                  Questions per batch — <span className="text-gray-400">{llmBatchSize}</span>
+                </label>
+                <div className="flex gap-2">
+                  {[10, 20, 50].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setLlmBatchSize(n)}
+                      className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${llmBatchSize === n ? "border-[#defe47] text-[#defe47]" : "border-gray-700 text-gray-400 hover:text-white"}`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-600 mt-1">Smaller batches are safer; larger batches are faster but may exceed context windows.</p>
+              </div>
+
+              {/* Progress */}
+              {llmJobStatus && (
+                <div className="rounded-xl border border-gray-700 bg-gray-900/50 p-4 space-y-2">
+                  {llmJobStatus.status === "pending" || llmJobStatus.status === "running" ? (
+                    <>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-300">Running…</span>
+                        <span className="text-gray-400 tabular-nums">
+                          {llmJobStatus.batches_done ?? 0} / {llmJobStatus.total_batches ?? "?"} batches
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-[#defe47] transition-all"
+                          style={{ width: `${llmJobStatus.total_batches ? ((llmJobStatus.batches_done ?? 0) / llmJobStatus.total_batches) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500">{llmJobStatus.total_questions} questions total</p>
+                    </>
+                  ) : llmJobStatus.status === "completed" ? (
+                    <div className="text-green-400 text-sm font-semibold">
+                      Done! Score: {typeof llmJobStatus.score === "number" ? llmJobStatus.score.toFixed(4) : "—"}
+                      {llmJobStatus.metric && <span className="text-gray-400 font-normal ml-1">({llmJobStatus.metric})</span>}
+                    </div>
+                  ) : llmJobStatus.status === "failed" ? (
+                    <div className="text-red-400 text-sm">{llmJobStatus.error || "Run failed"}</div>
+                  ) : null}
+                </div>
+              )}
+
+              {llmError && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{llmError}</div>
+              )}
+
+              <button
+                type="button"
+                onClick={runLlm}
+                disabled={llmRunning || !modelNameInput.trim() || !datasetKey}
+                className="px-6 py-2.5 rounded-lg bg-[#defe47] text-black text-sm font-semibold hover:bg-[#e8ff70] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {llmRunning ? "Running…" : "Run LLM + Submit"}
+              </button>
+              {!datasetKey && <p className="text-xs text-gray-500">Select a dataset in Step 1 first.</p>}
+            </div>
+          )}
+
           {errorMsg && (
             <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
               {errorMsg}
             </div>
           )}
 
-          {/* Submit button */}
+          {/* Submit button — hide when LLM tab active (it has its own) */}
+          {submitMode !== "llm" && (
           <div className="mt-6 flex flex-wrap items-center gap-4">
             <button
               type="button"
@@ -1218,6 +1498,7 @@ const SubmitToLeaderboard = ({
               <p className="text-xs text-gray-500">Fetch questions or upload a file first.</p>
             )}
           </div>
+          )}
 
           {submitResult && (
             <div className="mt-5 rounded-xl border border-[#defe47]/20 bg-[#defe47]/5 px-5 py-4 space-y-1">
