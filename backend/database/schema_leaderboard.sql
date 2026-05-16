@@ -47,3 +47,22 @@ CREATE TABLE IF NOT EXISTS evaluation_results (
 
 CREATE INDEX IF NOT EXISTS idx_evaluation_submission
     ON evaluation_results (model_submission_id);
+
+CREATE TABLE IF NOT EXISTS dataset_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dataset_name TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    url TEXT,
+    requested_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    admin_notes TEXT,
+    created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dataset_requests_status
+    ON dataset_requests (status);
+
+CREATE INDEX IF NOT EXISTS idx_dataset_requests_created
+    ON dataset_requests (created);

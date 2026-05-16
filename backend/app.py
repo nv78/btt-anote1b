@@ -8,13 +8,14 @@ from flask_cors import CORS
 import shared
 from blueprints import admin as _admin
 from blueprints import auth as _auth
+from blueprints import dataset_requests as _dataset_requests
 from blueprints import eval as _eval
 from blueprints import leaderboard as _leaderboard
 from blueprints import metrics as _metrics
 from blueprints import submissions as _submissions
 
 
-_BLUEPRINT_MODULES = [_leaderboard, _submissions, _eval, _auth, _admin, _metrics]
+_BLUEPRINT_MODULES = [_leaderboard, _submissions, _eval, _auth, _admin, _metrics, _dataset_requests]
 
 
 def _allowed_origins() -> list[str]:

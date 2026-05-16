@@ -17,9 +17,11 @@ import Leaderboard from "./landing_page_components/Leaderboard";
 import SubmitToLeaderboard  from "./landing_page_components/SubmitToLeaderboard";
 import AdminLeaderboardManager from "./landing_page_components/AdminLeaderboardManager";
 import AdminSubmissionsModeration from "./landing_page_components/AdminSubmissionsModeration";
+import RequestDataset from "./landing_page_components/RequestDataset";
+import AdminDatasetRequests from "./landing_page_components/AdminDatasetRequests";
 import AddDataset from "./landing_page_components/AddDataset";
 import DatasetDetails from "./landing_page_components/DatasetDetails";
-import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, adminSubmissionsPath, evaluationsPath, csvBenchmarksPath, addDatasetPath, loginPath, oauthCallbackPath, createLeaderboardPath } from "../constants/RouteConstants";
+import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, adminSubmissionsPath, adminDatasetRequestsPath, requestDatasetPath, evaluationsPath, csvBenchmarksPath, addDatasetPath, loginPath, oauthCallbackPath, createLeaderboardPath } from "../constants/RouteConstants";
 import MySubmissions from "./landing_page_components/MySubmissions";
 import HeaderBar from "./landing_page_components/HeaderBar";
 import CsvBenchmarksDemo from "./landing_page_components/CsvBenchmarksDemo";
@@ -79,8 +81,10 @@ function LandingPage() {
           <Route path={addDatasetPath} index element={<AuthGuard><AddDataset /></AuthGuard>} />,
           <Route path={createLeaderboardPath} index element={<AuthGuard><CreateLeaderboardFromHF /></AuthGuard>} />,
           <Route path="/dataset/:name" element={<DatasetDetails />} />,
+          <Route path={requestDatasetPath} index element={<RequestDataset />} />,
           <Route path={adminLeaderboardPath} index element={<AuthGuard><AdminLeaderboardManager /></AuthGuard>} />,
           <Route path={adminSubmissionsPath} index element={<AuthGuard><AdminSubmissionsModeration /></AuthGuard>} />,
+          <Route path={adminDatasetRequestsPath} index element={<AuthGuard><AdminDatasetRequests /></AuthGuard>} />,
           <Route path="*" element={<Navigate replace to="/" />} />
         </Routes>
       </div>

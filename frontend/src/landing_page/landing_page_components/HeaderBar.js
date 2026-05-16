@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   loginPath,
   mySubmissionsPath,
+  requestDatasetPath,
   submittoleaderboardPath,
 } from '../../constants/RouteConstants';
 import { canAccessContributorRoutes, clearLeaderboardJwt, getLeaderboardJwt } from '../../utils/leaderboardAuth';
@@ -21,6 +22,7 @@ export default function HeaderBar() {
     { label: 'Leaderboard', path: '/' },
     { label: 'Submit', path: submittoleaderboardPath },
     { label: 'My submissions', path: mySubmissionsPath },
+    { label: 'Request dataset', path: requestDatasetPath },
   ];
 
   const signedInWithJwt = authRev >= 0 && !!getLeaderboardJwt();
