@@ -1,9 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  addDatasetPath,
-  createLeaderboardPath,
-  csvBenchmarksPath,
   loginPath,
   mySubmissionsPath,
   submittoleaderboardPath,
@@ -24,9 +21,6 @@ export default function HeaderBar() {
     { label: 'Leaderboard', path: '/' },
     { label: 'Submit', path: submittoleaderboardPath },
     { label: 'My submissions', path: mySubmissionsPath },
-    { label: 'Add Dataset', path: addDatasetPath },
-    { label: 'Benchmarks', path: csvBenchmarksPath },
-    { label: '＋ New Leaderboard', path: createLeaderboardPath, outlined: true },
   ];
 
   const signedInWithJwt = authRev >= 0 && !!getLeaderboardJwt();
