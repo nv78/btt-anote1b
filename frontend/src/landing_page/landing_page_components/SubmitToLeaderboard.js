@@ -21,6 +21,62 @@ import { getLeaderboardJwt } from "../../utils/leaderboardAuth";
 // Simple API base for dev
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
 
+// ── Sample JSON return format component ──────────────────────────────────────
+
+const SAMPLE_OUTPUTS = {
+  text_classification:    ["positive", "negative", "positive"],
+  named_entity_recognition: ["Barack Obama; United States", "Apple Inc.; Cupertino", ""],
+  document_qa:            ["1955", "Evelyn Lincoln", "the Oval Office"],
+  line_qa:                ["Paris", "H2O", "photosynthesis"],
+  multiple_choice_qa:     ["A", "C", "B"],
+  natural_language_inference: ["entailment", "contradiction", "neutral"],
+  math_reasoning:         ["42", "17.5", "100"],
+  summarization:          ["Scientists discover water on Mars.", "Stock markets fall sharply.", "New study links diet to longevity."],
+  translation:            ["Bonjour le monde", "Gracias por su ayuda", "Wie geht es Ihnen"],
+};
+
+const SampleJsonFormat = ({ taskType, sentenceIds }) => {
+  const [copied, setCopied] = React.useState(false);
+  const tt = (taskType || "text_classification").toLowerCase().replace(/-/g, "_");
+  const outputs = SAMPLE_OUTPUTS[tt] || SAMPLE_OUTPUTS.text_classification;
+  const ids = sentenceIds && sentenceIds.length ? sentenceIds : [0, 1, 2];
+  const sample = ids.slice(0, 3).map((id, i) => ({ id, output: outputs[i] || outputs[0] }));
+  const sampleStr = JSON.stringify(sample, null, 2);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(sampleStr);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-gray-900/80 border-b border-gray-700">
+        <div>
+          <span className="text-xs font-semibold text-[#defe47]">Expected JSON format</span>
+          <span className="text-xs text-gray-500 ml-2">— what your LLM should return</span>
+        </div>
+        <button
+          type="button"
+          onClick={copy}
+          className="text-xs px-3 py-1 rounded-md border border-gray-600 text-gray-300 hover:border-[#defe47]/50 hover:text-[#defe47] transition-colors"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <pre className="text-xs text-gray-300 bg-[#0a0f1a] p-4 overflow-auto font-mono leading-relaxed">
+        {sampleStr}
+      </pre>
+      <div className="px-4 py-2.5 bg-gray-900/50 border-t border-gray-700 text-xs text-gray-500 space-y-0.5">
+        <div><code className="text-gray-400">id</code> — must match the question IDs from Step 2</div>
+        <div><code className="text-gray-400">output</code> — your model's prediction for that question (also accepted: <code className="text-gray-400">prediction</code>, <code className="text-gray-400">answer</code>)</div>
+      </div>
+    </div>
+  );
+};
+
 const SubmitToLeaderboard = ({
   flowType = FlowType.PREDICT,
   // Hooks to navigate out or set page states
@@ -1356,6 +1412,12 @@ const SubmitToLeaderboard = ({
               {translations.length > 0 && (
                 <p className="text-xs text-green-400">{translations.length} answers loaded from JSON.</p>
               )}
+
+              {/* Sample return format */}
+              <SampleJsonFormat
+                taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
+                sentenceIds={sentenceIds.slice(0, 3)}
+              />
             </div>
           )}
 
