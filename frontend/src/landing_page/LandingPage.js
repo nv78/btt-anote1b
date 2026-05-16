@@ -77,7 +77,7 @@ function LandingPage() {
           <Route path={oauthCallbackPath} element={<OAuthCallback />} />,
           <Route path={submittoleaderboardPath} index element={<AuthGuard><SubmitToLeaderboard /></AuthGuard>} />,
           <Route path={mySubmissionsPath} index element={<AuthGuard><MySubmissions /></AuthGuard>} />,
-          <Route path={csvBenchmarksPath} index element={<CsvBenchmarksDemo />} />,
+          <Route path={csvBenchmarksPath} index element={<Navigate replace to="/" />} />,
           <Route path={addDatasetPath} index element={<AuthGuard><AddDataset /></AuthGuard>} />,
           <Route path={createLeaderboardPath} index element={<AuthGuard><CreateLeaderboardFromHF /></AuthGuard>} />,
           <Route path="/dataset/:name" element={<DatasetDetails />} />,

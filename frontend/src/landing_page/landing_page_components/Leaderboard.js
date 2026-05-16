@@ -178,6 +178,7 @@ const Leaderboard = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [taskFilter, setTaskFilter] = useState("");
   const [domainFilter, setDomainFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [curatedDatasets, setCuratedDatasets] = useState([]);
   const [viewMode, setViewMode] = useState('live'); // 'live' | 'curated'
   const [loading, setLoading] = useState(true);
@@ -1294,6 +1295,7 @@ const Leaderboard = () => {
   }, [displayDatasets]);
 
   const filteredDatasets = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return displayDatasets.filter((d) => {
       if (taskFilter) {
         const tt = (d.task_type || "").toLowerCase();
@@ -1301,9 +1303,10 @@ const Leaderboard = () => {
         if (!match) return false;
       }
       if (domainFilter && domainMeta(d.name, d.task_type).label !== domainFilter) return false;
+      if (q && !(d.name || "").toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [displayDatasets, taskFilter, domainFilter]);
+  }, [displayDatasets, taskFilter, domainFilter, searchQuery]);
 
   const rankBadge = (rank) => {
     if (rank === 1) return <span title="1st place" className="mr-1">🥇</span>;
@@ -1372,31 +1375,47 @@ const Leaderboard = () => {
             </button>
           ))}
         </div>
-        {/* Domain dropdown */}
-        {availableDomains.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 shrink-0">Domain</span>
-            <select
-              value={domainFilter}
-              onChange={(e) => setDomainFilter(e.target.value)}
-              className="rounded-lg bg-[#0d1421] border border-gray-700 text-white text-xs px-3 py-1.5"
-            >
-              <option value="">All domains</option>
-              {availableDomains.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-            {(taskFilter || domainFilter) && (
-              <button
-                type="button"
-                onClick={() => { setTaskFilter(""); setDomainFilter(""); }}
-                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-              >
-                Clear filters
-              </button>
-            )}
+        {/* Search + domain row */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search */}
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search datasets…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="rounded-lg bg-[#0d1421] border border-gray-700 text-white text-xs pl-8 pr-3 py-1.5 w-48 focus:outline-none focus:border-gray-500 placeholder-gray-600"
+            />
           </div>
-        )}
+          {/* Domain dropdown */}
+          {availableDomains.length > 0 && (
+            <>
+              <span className="text-xs text-gray-500 shrink-0">Domain</span>
+              <select
+                value={domainFilter}
+                onChange={(e) => setDomainFilter(e.target.value)}
+                className="rounded-lg bg-[#0d1421] border border-gray-700 text-white text-xs px-3 py-1.5"
+              >
+                <option value="">All domains</option>
+                {availableDomains.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </>
+          )}
+          {(taskFilter || domainFilter || searchQuery) && (
+            <button
+              type="button"
+              onClick={() => { setTaskFilter(""); setDomainFilter(""); setSearchQuery(""); }}
+              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       </div>
 
       {apiFailed && (
@@ -1451,7 +1470,7 @@ const Leaderboard = () => {
                 <div className="text-base font-semibold text-white">No datasets match these filters.</div>
                 <button
                   type="button"
-                  onClick={() => { setTaskFilter(""); setDomainFilter(""); }}
+                  onClick={() => { setTaskFilter(""); setDomainFilter(""); setSearchQuery(""); }}
                   className="mt-4 text-sm text-[#defe47] hover:underline"
                 >
                   Clear filters
