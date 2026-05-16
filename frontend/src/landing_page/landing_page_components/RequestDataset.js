@@ -8,9 +8,10 @@ const TASK_TYPES = [
   { value: "document_qa", label: "Document Q&A" },
   { value: "retrieval", label: "Retrieval / RAG" },
   { value: "translation", label: "Translation" },
+  { value: "other", label: "Other (specify below)" },
 ];
 
-const empty = { dataset_name: "", task_type: "text_classification", description: "", url: "", requested_by: "" };
+const empty = { dataset_name: "", task_type: "text_classification", custom_task_type: "", description: "", url: "", requested_by: "" };
 
 export default function RequestDataset() {
   const [form, setForm] = useState(empty);
@@ -30,7 +31,7 @@ export default function RequestDataset() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dataset_name: form.dataset_name.trim(),
-          task_type: form.task_type,
+          task_type: form.task_type === "other" ? (form.custom_task_type.trim() || "other") : form.task_type,
           description: form.description.trim(),
           url: form.url.trim() || undefined,
           requested_by: form.requested_by.trim() || "anonymous",
@@ -106,6 +107,16 @@ export default function RequestDataset() {
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
+            {form.task_type === "other" && (
+              <input
+                type="text"
+                required
+                placeholder="Describe the task type (e.g. Summarization, Code Generation)"
+                value={form.custom_task_type}
+                onChange={(e) => update("custom_task_type", e.target.value)}
+                className="mt-2 w-full rounded-lg bg-[#0d1421] border border-gray-700 text-white text-sm px-4 py-2.5 focus:outline-none focus:border-[#defe47]/50"
+              />
+            )}
           </div>
 
           <div>

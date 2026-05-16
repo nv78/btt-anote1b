@@ -7,31 +7,19 @@ from shared import get_db_connection, require_admin, rate_limit, validate_text, 
 
 bp = Blueprint("dataset_requests", __name__)
 
-VALID_TASK_TYPES = {
-    "text_classification",
-    "named_entity_recognition",
-    "document_qa",
-    "retrieval",
-    "translation",
-}
-
-
 @bp.post("/public/request_dataset")
 @rate_limit("ADD_DATASET_RATE_LIMIT", "5/minute")
 def request_dataset():
     data = request.get_json(silent=True) or {}
     try:
         dataset_name = validate_text(data.get("dataset_name"), "dataset_name", 200)
-        task_type = validate_text(data.get("task_type"), "task_type", 60)
+        task_type = validate_text(data.get("task_type"), "task_type", 100)
         description = validate_text(data.get("description"), "description", 1000)
         requested_by = validate_text(data.get("requested_by", "anonymous"), "requested_by", 255)
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
     url = (data.get("url") or "").strip()[:500] or None
-
-    if task_type not in VALID_TASK_TYPES:
-        return jsonify({"success": False, "error": f"task_type must be one of: {', '.join(sorted(VALID_TASK_TYPES))}"}), 400
 
     conn, cursor = get_db_connection()
     if not conn or not cursor:
