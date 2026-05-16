@@ -174,8 +174,9 @@ def _bootstrap_ci(
     scores: List[float] = []
     for _ in range(n_resamples):
         idxs = [random.randint(0, n - 1) for _ in range(n)]
-        gt_s = [ground_truth[i] for i in idxs]
-        pr_s = [predictions[i] for i in idxs]
+        # Re-index with sequential IDs so evaluator dicts don't collide on duplicate idxs
+        gt_s = [{**ground_truth[i], "id": str(j)} for j, i in enumerate(idxs)]
+        pr_s = [{**predictions[i], "id": str(j)} for j, i in enumerate(idxs)]
         try:
             det = evaluator.evaluate(gt_s, pr_s)
             v = det.get(primary_metric)
