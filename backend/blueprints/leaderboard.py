@@ -51,6 +51,109 @@ def submission_format():
     return jsonify(payload)
 
 
+@bp.get('/public/dataset_details')
+def dataset_details():
+    """Return full metadata, metric docs, and top model scores for a single dataset."""
+    raw = request.args.get("name")
+    if not raw:
+        return jsonify({"success": False, "error": "Missing query parameter: name"}), 400
+    try:
+        name = validate_text(raw, "name")
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    # Try DB first, then static in-memory store
+    ds_row = None
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT name, task_type, evaluation_metric, reference_data FROM benchmark_datasets "
+                "WHERE name = %s AND active = TRUE",
+                (name,),
+            )
+            ds_row = cursor.fetchone()
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    if not ds_row:
+        ds_row = next((d for d in _STORE["datasets"] if d.get("name") == name), None)
+    if not ds_row:
+        # Try LEADERBOARD_DATA static entries (may be static-only datasets)
+        ds_row = next((d for d in LEADERBOARD_DATA if d.get("name") == name), None)
+    if not ds_row:
+        return jsonify({"success": False, "error": f"Dataset '{name}' not found"}), 404
+
+    ref = ds_row.get("reference_data") or {}
+    if isinstance(ref, str):
+        try:
+            ref = json.loads(ref)
+        except Exception:
+            ref = {}
+
+    task_type = ds_row.get("task_type") or ""
+    eval_metric = ds_row.get("evaluation_metric") or ""
+
+    # Metric documentation
+    try:
+        task_metrics = metrics_for_task(task_type)
+        nt = normalize_task_type_for_metrics(task_type)
+        primary_doc = primary_metric_catalog_entry(eval_metric)
+    except Exception:
+        task_metrics = {}
+        nt = task_type
+        primary_doc = None
+
+    # Top models from DB
+    top_models = []
+    conn2, cursor2 = get_db_connection()
+    if conn2 and cursor2:
+        try:
+            cursor2.execute(
+                "SELECT ms.model_name, er.score, ms.created "
+                "FROM model_submissions ms "
+                "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                "JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                "WHERE bd.name = %s "
+                "ORDER BY er.score DESC LIMIT 10",
+                (name,),
+            )
+            rows = cursor2.fetchall()
+            for r in rows:
+                top_models.append({"model": r["model_name"], "score": r["score"], "updated": r.get("created")})
+        finally:
+            try:
+                cursor2.close()
+                conn2.close()
+            except Exception:
+                pass
+
+    # Fall back to static leaderboard models if none in DB
+    if not top_models:
+        static = next((d for d in LEADERBOARD_DATA if d.get("name") == name), None)
+        if static and static.get("models"):
+            for m in static["models"][:10]:
+                top_models.append({"model": m.get("model"), "score": m.get("score"), "updated": m.get("updated")})
+
+    dataset_out = {
+        "name": ds_row.get("name", name),
+        "task_type": task_type,
+        "task_type_normalized": nt,
+        "evaluation_metric": eval_metric,
+        "url": ref.get("url") or ds_row.get("url"),
+        "description": ref.get("description") or ds_row.get("description"),
+        "size": ref.get("size"),
+        "primary_metric_documentation": primary_doc or {},
+        "recommended_metrics_for_task": task_metrics,
+    }
+
+    return jsonify({"success": True, "dataset": dataset_out, "top_models": top_models})
+
+
 def _questions_from_reference_data(reference_data: object) -> list[dict[str, Any]]:
     if isinstance(reference_data, str):
         try:

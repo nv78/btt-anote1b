@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import TaskAdvancedMetricsPanel from './TaskAdvancedMetricsPanel';
 
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || 'http://localhost:5001';
@@ -28,6 +28,7 @@ function MetricCard({ metricKey, metric }) {
 const DatasetDetails = () => {
   const { name } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
@@ -53,7 +54,29 @@ const DatasetDetails = () => {
         if (!res.ok || json.success !== true) throw new Error(json.error || 'Failed to fetch dataset');
         if (!ignore) setData(json);
       } catch (e) {
-        if (!ignore) setError(e.message || 'Error loading dataset');
+        // Fall back to navigation state for static-only datasets
+        const fallback = location.state;
+        if (fallback && fallback.name) {
+          if (!ignore) setData({
+            dataset: {
+              name: fallback.name,
+              task_type: fallback.task_type || '',
+              task_type_normalized: fallback.task_type || '',
+              evaluation_metric: fallback.evaluation_metric || '',
+              url: fallback.url,
+              description: fallback.description,
+              primary_metric_documentation: {},
+              recommended_metrics_for_task: {},
+            },
+            top_models: (fallback.models || []).map(m => ({
+              model: m.model,
+              score: m.score,
+              updated: m.updated,
+            })),
+          });
+        } else {
+          if (!ignore) setError(e.message || 'Error loading dataset');
+        }
       } finally {
         if (!ignore) setLoading(false);
       }
@@ -61,7 +84,7 @@ const DatasetDetails = () => {
     if (decodedName) run();
     else setLoading(false);
     return () => { ignore = true; };
-  }, [decodedName]);
+  }, [decodedName, location.state]);
 
   const ds = data?.dataset;
   const primaryDoc = ds?.primary_metric_documentation;

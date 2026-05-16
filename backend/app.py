@@ -65,6 +65,7 @@ def index():
             "/public/datasets",
             "/public/get_source_sentences",
             "/public/submission_format",
+            "/public/dataset_details",
             "/public/submit_model",
             "/public/eval_jobs/<job_id>",
             "/public/my_submissions",

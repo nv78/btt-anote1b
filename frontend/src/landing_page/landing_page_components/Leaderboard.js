@@ -1875,7 +1875,16 @@ const Leaderboard = () => {
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700/60 text-gray-500 hover:text-[#28b2fb] hover:border-[#28b2fb]/30 transition-colors"
-                  onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`)}
+                  onClick={() => navigate(`/dataset/${encodeURIComponent(dataset.name)}`, {
+                    state: {
+                      name: dataset.name,
+                      task_type: dataset.task_type,
+                      evaluation_metric: dataset.evaluation_metric,
+                      url: dataset.url,
+                      description: dataset.description,
+                      models: dataset.models,
+                    }
+                  })}
                 >
                   Details
                 </button>
