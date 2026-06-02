@@ -16,8 +16,11 @@ def admin_list_submissions():
     date_from = _parse_iso_datetime(raw_from) if raw_from else None
     date_to = _parse_iso_datetime(raw_to) if raw_to else None
     include_outputs = (request.args.get("include_outputs") or "").lower() in {"1", "true", "yes"}
-    page = max(1, int(request.args.get("page", 1)))
-    page_size = min(200, max(1, int(request.args.get("page_size", 25))))
+    try:
+        page = parse_bounded_int(request.args.get("page"), "page", 1, min_value=1)
+        page_size = parse_bounded_int(request.args.get("page_size"), "page_size", 25, min_value=1, max_value=200)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     offset = (page - 1) * page_size
     cursor_token = (request.args.get("cursor") or "").strip()
     use_cursor = bool(cursor_token)

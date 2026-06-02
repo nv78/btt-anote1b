@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 
 try:
     import app as app_module
 except ImportError:
     import backend.app as app_module  # type: ignore
+
+
+def _make_jwt(sub: str, secret: str = "dev-secret") -> str:
+    import jwt as pyjwt
+    return pyjwt.encode({"sub": sub}, secret, algorithm="HS256")
+
+
+def _auth_headers(sub: str) -> dict:
+    return {"Authorization": f"Bearer {_make_jwt(sub)}"}
 
 app = app_module.app
 _STORE = app_module._STORE
@@ -65,16 +75,18 @@ def test_get_leaderboard_keyset_matches_offset(monkeypatch):
 
 
 def test_my_submissions_cursor(monkeypatch):
+    monkeypatch.setenv("LEADERBOARD_JWT_SECRET", "dev-secret")
     monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
     _seed_leaderboard_rows()
+    headers = _auth_headers("user-a")
     with app.test_client() as c:
-        r1 = c.get("/public/my_submissions?submitter_id=user-a&page_size=2")
+        r1 = c.get("/public/my_submissions?page_size=2", headers=headers)
         assert r1.status_code == 200
         j1 = r1.get_json()
         assert len(j1["submissions"]) == 2
         nc = j1.get("next_cursor")
         assert nc
-        r2 = c.get("/public/my_submissions?submitter_id=user-a&page_size=2&cursor=" + nc)
+        r2 = c.get("/public/my_submissions?page_size=2&cursor=" + nc, headers=headers)
         j2 = r2.get_json()
         assert len(j2["submissions"]) == 1
 

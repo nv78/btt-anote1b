@@ -43,6 +43,66 @@ def test_dataset_questions_never_exposes_labels(monkeypatch):
         assert "labels" not in data
 
 
+def test_dataset_questions_exposes_multiple_choice_options_without_answer(monkeypatch):
+    monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
+    reset_store()
+    app_module._STORE["datasets"].append({
+        "name": "public_mcq",
+        "task_type": "multiple_choice_qa",
+        "evaluation_metric": "accuracy",
+        "reference_data": {
+            "ground_truth": [
+                {
+                    "id": 3,
+                    "question": "Which option is correct?",
+                    "options": {"A": "First", "B": "Second"},
+                    "answer": "B",
+                },
+            ],
+        },
+    })
+
+    with app.test_client() as c:
+        r = c.get("/public/dataset_questions?dataset=public_mcq")
+        assert r.status_code == 200
+        item = r.get_json()["questions"][0]
+        assert item["options"] == [{"label": "A", "text": "First"}, {"label": "B", "text": "Second"}]
+        assert "answer" not in item
+        assert "label" not in item
+
+
+def test_get_source_sentences_includes_multiple_choice_options_without_answer(monkeypatch):
+    monkeypatch.setattr(app_module, "get_db_connection", lambda: (None, None))
+    reset_store()
+    app_module._STORE["datasets"].append({
+        "name": "public_mcq_sources",
+        "task_type": "multiple_choice_qa",
+        "evaluation_metric": "accuracy",
+        "reference_data": {
+            "ground_truth": [
+                {
+                    "id": 4,
+                    "question": "Pick the best answer.",
+                    "choices": ["Alpha", "Beta", "Gamma"],
+                    "answer": "C",
+                },
+            ],
+        },
+    })
+
+    with app.test_client() as c:
+        r = c.get("/public/get_source_sentences?dataset_name=public_mcq_sources&count=1")
+        assert r.status_code == 200
+        item = r.get_json()["questions"][0]
+        assert item["options"] == [
+            {"label": "A", "text": "Alpha"},
+            {"label": "B", "text": "Beta"},
+            {"label": "C", "text": "Gamma"},
+        ]
+        assert "answer" not in item
+        assert "label" not in item
+
+
 def test_submit_model_daily_quota(monkeypatch):
     monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
     monkeypatch.setenv("DAILY_SUBMISSION_LIMIT", "2")
@@ -89,6 +149,71 @@ def test_submit_model_daily_quota(monkeypatch):
         assert data["limit"] == 2
         assert data["resets_at"].endswith("+00:00")
         assert r3.headers["X-Submissions-Remaining"] == "0"
+
+
+def test_submit_model_daily_quota_uses_sqlite_db_counter(monkeypatch, tmp_path):
+    monkeypatch.setenv("DISABLE_RATE_LIMIT", "1")
+    monkeypatch.setenv("DAILY_SUBMISSION_LIMIT", "2")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "quota.db"))
+    for key in ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_PORT"):
+        monkeypatch.delenv(key, raising=False)
+    reset_store()
+    conn, cursor = app_module.get_db_connection()
+    cursor.execute(
+        "INSERT INTO benchmark_datasets (name, task_type, evaluation_metric, reference_data, active) VALUES (%s, %s, %s, %s, TRUE)",
+        (
+            "quota_db_classification",
+            "text_classification",
+            "accuracy",
+            '{"source_texts": ["hello"], "labels": ["yes"]}',
+        ),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    payload = {
+        "benchmarkDatasetName": "quota_db_classification",
+        "modelName": "quota-db-model",
+        "modelResults": ["yes"],
+        "sentence_ids": [0],
+        "submitterId": "quota-db-user",
+    }
+
+    with app.test_client() as c:
+        r1 = c.post("/public/submit_model", json=payload)
+        assert r1.status_code == 200
+
+        quota_after_one = c.get("/public/submission_quota?submitter_id=quota-db-user")
+        assert quota_after_one.status_code == 200
+        assert quota_after_one.get_json()["used_today"] == 1
+        assert app_module._STORE.setdefault("submission_counts", {}) == {}
+
+        payload2 = {**payload, "modelName": "quota-db-model-2"}
+        r2 = c.post("/public/submit_model", json=payload2)
+        assert r2.status_code == 200, r2.get_data(as_text=True)
+
+        payload3 = {**payload, "modelName": "quota-db-model-3"}
+        r3 = c.post("/public/submit_model", json=payload3)
+        assert r3.status_code == 429
+        assert r3.get_json()["error"] == "Daily submission limit reached"
+
+
+def test_rate_limit_uses_sqlite_db_counter(monkeypatch, tmp_path):
+    monkeypatch.delenv("DISABLE_RATE_LIMIT", raising=False)
+    monkeypatch.setenv("QUOTA_RATE_LIMIT", "2/minute")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "rate.db"))
+    for key in ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_PORT"):
+        monkeypatch.delenv(key, raising=False)
+    reset_store()
+
+    with app.test_client() as c:
+        r1 = c.get("/public/submission_quota?submitter_id=rate-db-user")
+        assert r1.status_code == 200
+        r2 = c.get("/public/submission_quota?submitter_id=rate-db-user")
+        assert r2.status_code == 200
+        r3 = c.get("/public/submission_quota?submitter_id=rate-db-user")
+        assert r3.status_code == 429
+        assert r3.get_json()["error"] == "Rate limit exceeded"
 
 
 def test_seed_real_benchmarks_persist_in_sqlite(monkeypatch, tmp_path):

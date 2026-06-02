@@ -1,4 +1,6 @@
 import os
+import hmac
+import hashlib
 
 # Local dev: load Leaderboard/backend/.env when python-dotenv is installed.
 try:
@@ -79,6 +81,10 @@ class SQLiteCursorAdapter:
     @property
     def lastrowid(self) -> Any:
         return self._cursor.lastrowid
+
+    @property
+    def rowcount(self) -> int:
+        return self._cursor.rowcount
 
     def execute(self, query: str, params: tuple | list = ()) -> "SQLiteCursorAdapter":
         query = query.replace("%s", "?")
@@ -244,18 +250,107 @@ def daily_submission_limit() -> int:
         return 5
 
 
+def api_key_matches(supplied: str | None, configured: list[str]) -> bool:
+    supplied_key = (supplied or "").strip()
+    return bool(supplied_key) and any(hmac.compare_digest(supplied_key, key) for key in configured)
+
+
+def parse_bounded_int(
+    value: Any,
+    field: str,
+    default: int,
+    *,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
+    if value in (None, ""):
+        out = default
+    else:
+        try:
+            out = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be an integer") from exc
+    if min_value is not None:
+        out = max(min_value, out)
+    if max_value is not None:
+        out = min(max_value, out)
+    return out
+
+
 def _consume_submission_quota(submitter_id: str) -> tuple[bool, int, str]:
     now = utc_now()
     day = now.date().isoformat()
     limit = daily_submission_limit()
     key = f"{submitter_id}:{day}"
-    counts = _STORE.setdefault("submission_counts", {})
-    used = int(counts.get(key, 0))
     resets_at = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) + timedelta(days=1)
-    if limit > 0 and used >= limit:
-        return False, 0, resets_at.isoformat()
-    counts[key] = used + 1
-    remaining = max(0, limit - int(counts[key]))
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS daily_submission_usage ("
+                "submitter_id VARCHAR(255) NOT NULL, "
+                "usage_day VARCHAR(10) NOT NULL, "
+                "used_count INTEGER NOT NULL DEFAULT 0, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "PRIMARY KEY (submitter_id, usage_day)"
+                ")"
+            )
+            conn.commit()
+            is_sqlite = isinstance(cursor, SQLiteCursorAdapter)
+            if is_sqlite:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor.execute(
+                    "SELECT used_count FROM daily_submission_usage WHERE submitter_id = %s AND usage_day = %s",
+                    (submitter_id, day),
+                )
+            else:
+                try:
+                    conn.start_transaction()
+                except Exception:
+                    cursor.execute("START TRANSACTION")
+                cursor.execute(
+                    "SELECT used_count FROM daily_submission_usage WHERE submitter_id = %s AND usage_day = %s FOR UPDATE",
+                    (submitter_id, day),
+                )
+            row = cursor.fetchone()
+            used = int((row or {}).get("used_count", 0))
+            if limit > 0 and used >= limit:
+                conn.rollback()
+                return False, 0, resets_at.isoformat()
+            next_used = used + 1
+            if row:
+                cursor.execute(
+                    "UPDATE daily_submission_usage SET used_count = %s, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE submitter_id = %s AND usage_day = %s",
+                    (next_used, submitter_id, day),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO daily_submission_usage (submitter_id, usage_day, used_count) VALUES (%s, %s, %s)",
+                    (submitter_id, day, next_used),
+                )
+            conn.commit()
+            return True, max(0, limit - next_used), resets_at.isoformat()
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.exception("submission_quota_db_failed", extra={"error": str(exc)})
+            return False, 0, resets_at.isoformat()
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    with _QUOTA_LOCK:
+        counts = _STORE.setdefault("submission_counts", {})
+        used = int(counts.get(key, 0))
+        if limit > 0 and used >= limit:
+            return False, 0, resets_at.isoformat()
+        counts[key] = used + 1
+        remaining = max(0, limit - counts[key])
     return True, remaining, resets_at.isoformat()
 
 
@@ -274,7 +369,7 @@ def require_api_key(fn):
         if not require_key:
             return fn(*args, **kwargs)
         supplied = request.headers.get("X-API-Key", "")
-        if supplied in configured:
+        if api_key_matches(supplied, configured):
             return fn(*args, **kwargs)
         auth = request.headers.get("Authorization", "") or ""
         if auth.startswith("Bearer "):
@@ -295,8 +390,9 @@ def require_admin(fn):
         keys = [k.strip() for k in os.getenv("LEADERBOARD_ADMIN_API_KEYS", "").split(",") if k.strip()]
         if not keys:
             return jsonify({"success": False, "error": "Admin API not configured"}), 503
-        supplied = (request.headers.get("X-Admin-Key") or request.headers.get("X-API-Key") or "").strip()
-        if supplied not in keys:
+        supplied = request.headers.get("X-Admin-Key") or request.headers.get("X-API-Key")
+        authed = api_key_matches(supplied, keys)
+        if not authed:
             return jsonify({"success": False, "error": "Unauthorized"}), 401
         return fn(*args, **kwargs)
 
@@ -306,9 +402,77 @@ def require_admin(fn):
 _RATE_WINDOWS = defaultdict(deque)
 
 
-def rate_limit(env_name, default_limit):
-    """Small in-process limiter for write/evaluation endpoints.
+def _consume_db_rate_limit(rate_key: str, window_start: int, max_calls: int) -> bool | None:
+    conn, cursor = get_db_connection()
+    if not conn or not cursor:
+        return None
+    try:
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS request_rate_usage ("
+            "rate_key VARCHAR(255) NOT NULL, "
+            "window_start INTEGER NOT NULL, "
+            "used_count INTEGER NOT NULL DEFAULT 0, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "PRIMARY KEY (rate_key, window_start)"
+            ")"
+        )
+        conn.commit()
+        is_sqlite = isinstance(cursor, SQLiteCursorAdapter)
+        if is_sqlite:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor.execute(
+                "SELECT used_count FROM request_rate_usage WHERE rate_key = %s AND window_start = %s",
+                (rate_key, window_start),
+            )
+        else:
+            try:
+                conn.start_transaction()
+            except Exception:
+                cursor.execute("START TRANSACTION")
+            cursor.execute(
+                "SELECT used_count FROM request_rate_usage WHERE rate_key = %s AND window_start = %s FOR UPDATE",
+                (rate_key, window_start),
+            )
+        row = cursor.fetchone()
+        used = int((row or {}).get("used_count", 0))
+        if used >= max_calls:
+            conn.rollback()
+            return False
+        next_used = used + 1
+        if row:
+            cursor.execute(
+                "UPDATE request_rate_usage SET used_count = %s, updated_at = CURRENT_TIMESTAMP "
+                "WHERE rate_key = %s AND window_start = %s",
+                (next_used, rate_key, window_start),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO request_rate_usage (rate_key, window_start, used_count) VALUES (%s, %s, %s)",
+                (rate_key, window_start, next_used),
+            )
+        cutoff = window_start - 3600
+        cursor.execute("DELETE FROM request_rate_usage WHERE window_start < %s", (cutoff,))
+        conn.commit()
+        return True
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("request_rate_limit_db_failed", extra={"error": str(exc)})
+        return False
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
 
+
+def rate_limit(env_name, default_limit):
+    """Shared per-minute limiter for write/evaluation endpoints.
+
+    Uses the configured DB when available; falls back to in-process storage only when no DB can be opened.
     Format: count/minute, for example 10/minute. Set DISABLE_RATE_LIMIT=1 to bypass.
     """
 
@@ -323,6 +487,13 @@ def rate_limit(env_name, default_limit):
                 return fn(*args, **kwargs)
             max_calls = int(match.group(1))
             now = time()
+            raw_key = f"{request.remote_addr or 'unknown'}:{request.path}"
+            db_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+            db_allowed = _consume_db_rate_limit(db_key, int(now // 60) * 60, max_calls)
+            if db_allowed is False:
+                return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+            if db_allowed is True:
+                return fn(*args, **kwargs)
             key = (request.remote_addr or "unknown", request.path)
             window = _RATE_WINDOWS[key]
             while window and now - window[0] > 60:
@@ -384,8 +555,12 @@ _STORE = {
 _EVAL_JOBS: dict = {}
 _EVAL_JOBS_LOCK = threading.Lock()
 
+# Quota counter lock — prevents concurrent requests from the same user bypassing daily limit.
+_QUOTA_LOCK = threading.Lock()
+
 # UI-oriented datasets store (for add_dataset/add_model endpoints)
 LEADERBOARD_DATA = []  # list of dicts with fields per README
+_LD_LOCK = threading.RLock()  # protects LEADERBOARD_DATA mutations
 
 
 # Small Spanish reference list to make BLEU behave reasonably if HF datasets are unavailable

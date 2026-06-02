@@ -1,0 +1,144 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Required GitHub repository secrets:
+#   AWS_ACCESS_KEY_ID         — IAM user with ECR push + EB deploy + S3 sync + CloudFront invalidate
+#   AWS_SECRET_ACCESS_KEY
+#   AWS_ACCOUNT_ID            — 12-digit AWS account number (no dashes)
+#   CLOUDFRONT_DIST_ID        — CloudFront distribution ID for leaderboard frontend
+#
+# Set once, then the CEO's agent can fill in the real values.
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO: anote-leaderboard-backend
+  EB_APP: anote-leaderboard
+  EB_ENV: anote-leaderboard-prod
+  S3_BUCKET: anote-leaderboard-frontend
+  REACT_APP_API_ENDPOINT: https://api-leaderboard.anote.ai
+
+jobs:
+  # ── 1. Run CI checks first ───────────────────────────────────────────────
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # ── 2. Push backend image to ECR ─────────────────────────────────────────
+  push-backend:
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push backend image
+        run: |
+          IMAGE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
+          docker build \
+            --platform linux/amd64 \
+            -t $IMAGE:${{ github.sha }} \
+            -t $IMAGE:latest \
+            ./backend
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
+          echo "IMAGE_URI=$IMAGE:${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Update Dockerrun.aws.json with new image tag
+        run: |
+          IMAGE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ github.sha }}
+          sed -i "s|<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/anote-leaderboard-backend:latest|$IMAGE|g" \
+            aws_deploy/Dockerrun.aws.json
+          cat aws_deploy/Dockerrun.aws.json
+
+  # ── 3. Deploy backend to Elastic Beanstalk ───────────────────────────────
+  deploy-backend:
+    needs: push-backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install EB CLI
+        run: pip install awsebcli
+
+      - name: Update Dockerrun.aws.json
+        run: |
+          IMAGE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${{ github.sha }}
+          sed -i "s|<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/anote-leaderboard-backend:latest|$IMAGE|g" \
+            aws_deploy/Dockerrun.aws.json
+
+      - name: Deploy to Elastic Beanstalk
+        working-directory: aws_deploy
+        run: |
+          eb init ${{ env.EB_APP }} --region ${{ env.AWS_REGION }} --platform "Docker"
+          eb deploy ${{ env.EB_ENV }} --label "deploy-${{ github.sha }}" --timeout 15
+
+  # ── 4. Build & deploy frontend to S3 + CloudFront ────────────────────────
+  deploy-frontend:
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+        working-directory: frontend
+
+      - name: Build (production)
+        run: npm run build
+        working-directory: frontend
+        env:
+          CI: "false"
+          REACT_APP_API_ENDPOINT: ${{ env.REACT_APP_API_ENDPOINT }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync frontend/build/ s3://${{ env.S3_BUCKET }} \
+            --acl public-read \
+            --delete \
+            --cache-control "max-age=31536000,immutable" \
+            --exclude "index.html"
+          # index.html must not be cached so routing updates reach users immediately
+          aws s3 cp frontend/build/index.html s3://${{ env.S3_BUCKET }}/index.html \
+            --acl public-read \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} \
+            --paths "/*"

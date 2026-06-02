@@ -11,6 +11,16 @@ def test_submit_model_body_has_required_keys():
     body = out["submit_model_body"]
     assert REQUIRED_FIELDS <= body.keys()
     assert len(body["modelResults"]) == len(body["sentence_ids"])
+    assert out["allowed_outputs"] == ["x", "y"]
+
+
+def test_submission_format_prefers_explicit_label_names():
+    from eval_core.leaderboard_bridge import submission_format_for_dataset
+
+    rd = {"source_texts": ["a", "b"], "labels": [0, 1], "label_names": ["negative", "positive"]}
+    out = submission_format_for_dataset("ds_contract", "text_classification", "accuracy", rd)
+    assert out["allowed_outputs"] == ["negative", "positive"]
+    assert out["submit_model_body"]["modelResults"][0] == "negative"
 
 
 def test_openapi_spec_returns_json():

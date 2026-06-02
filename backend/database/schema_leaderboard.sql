@@ -37,6 +37,9 @@ CREATE INDEX IF NOT EXISTS idx_model_submissions_submitter
 CREATE INDEX IF NOT EXISTS idx_model_submissions_created
     ON model_submissions (created);
 
+CREATE INDEX IF NOT EXISTS idx_model_submissions_submitted_by
+    ON model_submissions (submitted_by);
+
 CREATE TABLE IF NOT EXISTS evaluation_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_submission_id INTEGER NOT NULL,
@@ -68,3 +71,19 @@ CREATE INDEX IF NOT EXISTS idx_dataset_requests_status
 
 CREATE INDEX IF NOT EXISTS idx_dataset_requests_created
     ON dataset_requests (created);
+
+CREATE TABLE IF NOT EXISTS daily_submission_usage (
+    submitter_id VARCHAR(255) NOT NULL,
+    usage_day VARCHAR(10) NOT NULL,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (submitter_id, usage_day)
+);
+
+CREATE TABLE IF NOT EXISTS request_rate_usage (
+    rate_key VARCHAR(255) NOT NULL,
+    window_start INTEGER NOT NULL,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (rate_key, window_start)
+);

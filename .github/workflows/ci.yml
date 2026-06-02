@@ -1,6 +1,3 @@
-# Single CI entrypoint: backend tests + ruff + mkdocs; frontend lint + build.
-# (Legacy duplicate workflows backend-ci.yml / backend.yml were removed.)
-
 name: CI
 
 on:
@@ -8,36 +5,84 @@ on:
   pull_request:
 
 jobs:
+  # ── Backend: lint + test + coverage + Docker build ──────────────────────
   backend:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: ${{ github.workspace }}/backend
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install --upgrade pip
-      - run: pip install -r backend/requirements.txt pytest ruff mkdocs-material
-      - name: Pytest (backend/tests only; add backend/pytest if tests are moved there)
-        run: python -m pytest backend/tests -q
-      - run: ruff check backend
-      - run: mkdocs build --strict
+          cache: pip
 
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt pytest-cov ruff mkdocs-material
+
+      - name: Lint (ruff)
+        run: ruff check backend
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest backend/tests \
+            -q \
+            --cov=backend \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --tb=short
+        env:
+          DISABLE_RATE_LIMIT: "1"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Build docs
+        run: mkdocs build --strict
+
+      - name: Build backend Docker image
+        run: docker build -t anote-leaderboard-backend:ci ./backend --platform linux/amd64
+
+  # ── Frontend: lint + build + Docker build ───────────────────────────────
   frontend:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci --legacy-peer-deps
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
         working-directory: frontend
-      - run: npm run lint
+
+      - name: Lint
+        run: npm run lint
         working-directory: frontend
-      - run: npm run build
+
+      - name: Build (production)
+        run: npm run build
         working-directory: frontend
         env:
           CI: "false"
+          REACT_APP_API_ENDPOINT: https://api-leaderboard.anote.ai
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+          retention-days: 7
+
+      - name: Build frontend Docker image
+        run: docker build -t anote-leaderboard-frontend:ci ./frontend --platform linux/amd64

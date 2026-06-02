@@ -1,24 +1,52 @@
 services:
   backend:
     build: ./backend
+    restart: on-failure
     environment:
       PORT: 5001
-      FLASK_ENV: development
-      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+      FLASK_ENV: ${FLASK_ENV:-development}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
       SQLITE_DB_PATH: /data/leaderboard.db
+      # MySQL (uncomment + set when using production DB)
+      # DB_HOST: ${DB_HOST}
+      # DB_USER: ${DB_USER}
+      # DB_PASSWORD: ${DB_PASSWORD}
+      # DB_NAME: ${DB_NAME:-leaderboard}
+      # DB_PORT: ${DB_PORT:-3306}
+      LEADERBOARD_JWT_SECRET: ${LEADERBOARD_JWT_SECRET:-dev-jwt-secret-change-in-prod}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-dev-flask-secret-change-in-prod}
+      LEADERBOARD_ADMIN_API_KEYS: ${LEADERBOARD_ADMIN_API_KEYS:-dev-admin-key}
+      # Email (SMTP or SES — optional, see .env.example)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      LEADERBOARD_URL: ${LEADERBOARD_URL:-http://localhost:3001}
     ports:
       - "5001:5001"
     volumes:
       - leaderboard_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_ENDPOINT: http://localhost:5001
+    restart: on-failure
     environment:
-      REACT_APP_API_BASE: http://localhost:5001
+      REACT_APP_API_ENDPOINT: http://localhost:5001
     ports:
-      - "3000:3000"
+      - "3001:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   leaderboard_data:

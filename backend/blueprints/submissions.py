@@ -225,7 +225,7 @@ def submit_model():
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
-        print(f"Evaluation failed: {e}")
+        logger.exception("submission_evaluation_failed", extra={"error": str(e)})
         return jsonify({"success": False, "error": "Evaluation failed"}), 500
 
     eval_details = {"metric": metric, "metadata": metadata, "detailed_scores": detailed_scores}
@@ -287,8 +287,12 @@ def submit_model():
                 )
                 conn.commit()
             except Exception as e:
-                print(f"DB write failed, storing in memory instead: {e}")
-                submission_id = None
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.exception("submission_db_write_failed", extra={"error": str(e)})
+                raise RuntimeError("Database write failed") from e
             finally:
                 try:
                     cursor.close()
@@ -323,6 +327,27 @@ def submit_model():
             "model_submitted",
             extra={"dataset": benchmark_dataset_name, "model": model_name, "score": float(score)},
         )
+        # Fire-and-forget receipt email (no-op if SMTP not configured or submitted_by isn't an email)
+        try:
+            from email_notifications import send_submission_receipt  # type: ignore
+        except ImportError:
+            try:
+                from backend.email_notifications import send_submission_receipt  # type: ignore
+            except ImportError:
+                send_submission_receipt = None
+        if send_submission_receipt:
+            ci_low = detailed_scores.get("ci_low") if isinstance(detailed_scores, dict) else None
+            ci_high = detailed_scores.get("ci_high") if isinstance(detailed_scores, dict) else None
+            send_submission_receipt(
+                submitted_by or "",
+                model_name=model_name,
+                dataset_name=benchmark_dataset_name,
+                score=float(score),
+                metric=metric,
+                ci_low=ci_low,
+                ci_high=ci_high,
+                submission_id=submission_id,
+            )
         return {
             "success": True,
             "submission_id": submission_id,
@@ -347,8 +372,9 @@ def submit_model():
 
         job_id = str(uuid.uuid4())
         _now = utc_now().timestamp()
+        _owner = jwt_sub_from_request(request) or request.remote_addr or "anonymous"
         with _EVAL_JOBS_LOCK:
-            _EVAL_JOBS[job_id] = {"status": "pending", "_created": _now}
+            _EVAL_JOBS[job_id] = {"status": "pending", "_created": _now, "_owner": _owner}
             # Evict completed/failed jobs older than 1 hour
             expired = [k for k, v in _EVAL_JOBS.items() if _now - v.get("_created", _now) > 3600]
             for k in expired:
@@ -360,7 +386,10 @@ def submit_model():
         resp.headers["X-Submissions-Remaining"] = str(submissions_remaining)
         return resp
 
-    out = _persist_and_build_response()
+    try:
+        out = _persist_and_build_response()
+    except RuntimeError as e:
+        return jsonify({"success": False, "error": str(e)}), 500
     resp = jsonify(out)
     resp.headers["X-Submissions-Remaining"] = str(submissions_remaining)
     return resp
@@ -373,10 +402,15 @@ def eval_job_status(job_id):
         row = _EVAL_JOBS.get(job_id)
     if not row:
         return jsonify({"success": False, "error": "Unknown job"}), 404
-    return jsonify({"success": True, **row})
+    caller = jwt_sub_from_request(request) or request.remote_addr or "anonymous"
+    if row.get("_owner") and row["_owner"] != caller:
+        return jsonify({"success": False, "error": "Unknown job"}), 404
+    safe = {k: v for k, v in row.items() if not k.startswith("_")}
+    return jsonify({"success": True, **safe})
 
 
 @bp.get("/public/submission_quota")
+@rate_limit("QUOTA_RATE_LIMIT", "30/minute")
 def submission_quota():
     """Return today's submission quota usage for a submitter id or caller IP."""
     submitter_id = (request.args.get("submitter_id") or "").strip()
@@ -384,7 +418,36 @@ def submission_quota():
     limit = daily_submission_limit()
     day = utc_now().date().isoformat()
     key = f"{quota_submitter_id}:{day}"
-    used_today = int(_STORE.setdefault("submission_counts", {}).get(key, 0))
+    used_today = None
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS daily_submission_usage ("
+                "submitter_id VARCHAR(255) NOT NULL, "
+                "usage_day VARCHAR(10) NOT NULL, "
+                "used_count INTEGER NOT NULL DEFAULT 0, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "PRIMARY KEY (submitter_id, usage_day)"
+                ")"
+            )
+            conn.commit()
+            cursor.execute(
+                "SELECT used_count FROM daily_submission_usage WHERE submitter_id = %s AND usage_day = %s",
+                (quota_submitter_id, day),
+            )
+            row = cursor.fetchone()
+            used_today = int((row or {}).get("used_count", 0))
+        except Exception as exc:
+            logger.exception("submission_quota_read_failed", extra={"error": str(exc)})
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+    if used_today is None:
+        used_today = int(_STORE.setdefault("submission_counts", {}).get(key, 0))
     remaining = max(0, limit - used_today)
     return jsonify({
         "daily_limit": limit,
@@ -402,9 +465,9 @@ def my_submissions():
     sub = jwt_sub_from_request(request)
     if not sub:
         configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
-        supplied = request.headers.get("X-API-Key", "").strip()
+        supplied = request.headers.get("X-API-Key")
         # Only allow submitter_id fallback when a valid API key is presented
-        if configured and supplied in configured:
+        if api_key_matches(supplied, configured):
             sub = (request.args.get("submitter_id") or "").strip()
         elif not configured:
             # Dev mode: no API keys configured — require JWT; reject bare submitter_id param
@@ -416,8 +479,11 @@ def my_submissions():
             "error": "Unauthorized — sign in (JWT) or provide a valid X-API-Key to view submissions",
         }), 401
 
-    page = max(1, int(request.args.get("page", 1)))
-    page_size = min(100, max(1, int(request.args.get("page_size", 25))))
+    try:
+        page = parse_bounded_int(request.args.get("page"), "page", 1, min_value=1)
+        page_size = parse_bounded_int(request.args.get("page_size"), "page_size", 25, min_value=1, max_value=100)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     offset = (page - 1) * page_size
     cursor_token = (request.args.get("cursor") or "").strip()
     use_cursor = bool(cursor_token)
@@ -430,7 +496,7 @@ def my_submissions():
             return jsonify({"success": False, "error": "Invalid cursor"}), 400
         c_iso, anchor_id = dec
         anchor_c = _parse_iso_datetime(c_iso)
-        if anchor_c is None:
+        if anchor_c is None or anchor_id <= 0:
             return jsonify({"success": False, "error": "Invalid cursor"}), 400
 
     conn, cursor = get_db_connection()
@@ -610,12 +676,13 @@ def submission_detail(submission_id: int):
     sub = jwt_sub_from_request(request)
     if not sub:
         configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
-        require_key = os.getenv("REQUIRE_API_KEY", "").lower() in {"1", "true", "yes"} or bool(configured)
-        if require_key:
-            supplied = request.headers.get("X-API-Key", "")
-            if supplied not in configured:
-                return jsonify({"success": False, "error": "Unauthorized"}), 401
-        sub = (request.args.get("submitter_id") or "").strip()
+        supplied = request.headers.get("X-API-Key")
+        if api_key_matches(supplied, configured):
+            # Integrator: valid API key allows submitter_id param
+            sub = (request.args.get("submitter_id") or "").strip()
+        else:
+            # No JWT, no valid API key — reject; bare submitter_id param would be an info leak
+            return jsonify({"success": False, "error": "Unauthorized — sign in or provide X-API-Key"}), 401
     if not sub:
         return jsonify({"success": False, "error": "JWT or submitter_id required"}), 400
 
@@ -716,8 +783,8 @@ def _require_submission_owner(request, submission_id: int):
     sub = jwt_sub_from_request(request)
     if not sub:
         configured = [k.strip() for k in os.getenv("LEADERBOARD_API_KEYS", "").split(",") if k.strip()]
-        supplied = request.headers.get("X-API-Key", "").strip()
-        if configured and supplied in configured:
+        supplied = request.headers.get("X-API-Key")
+        if api_key_matches(supplied, configured):
             sub = (request.args.get("submitter_id") or "").strip()
     if not sub:
         return None, (jsonify({"success": False, "error": "Unauthorized"}), 401)
@@ -749,6 +816,10 @@ def delete_submission(submission_id: int):
             conn.commit()
             return jsonify({"success": True, "deleted": submission_id})
         except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             return jsonify({"success": False, "error": str(e)}), 500
         finally:
             try:
@@ -1038,7 +1109,10 @@ def run_llm_submission():
     provider = str(data.get("provider") or "openai").lower().strip()
     model_id = str(data.get("model_id") or data.get("modelId") or "").strip()
     user_api_key = str(data.get("api_key") or data.get("apiKey") or "").strip() or None
-    batch_size = max(1, min(100, int(data.get("batch_size", 20))))
+    try:
+        batch_size = parse_bounded_int(data.get("batch_size"), "batch_size", 20, min_value=1, max_value=100)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     is_public = 0 if str(data.get("is_public", True)).lower() in ("false", "0", "no", "private") else 1
     submitter_id = resolve_submitter_id(request, data)
 
@@ -1181,9 +1255,10 @@ def run_llm_submission():
 
     job_id = str(uuid.uuid4())
     _now = utc_now().timestamp()
+    _owner = jwt_sub_from_request(request) or request.remote_addr or "anonymous"
     with _EVAL_JOBS_LOCK:
         _EVAL_JOBS[job_id] = {
-            "status": "pending", "_created": _now,
+            "status": "pending", "_created": _now, "_owner": _owner,
             "batches_done": 0, "total_batches": (n + batch_size - 1) // batch_size,
             "total_questions": n,
         }

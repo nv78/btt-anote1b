@@ -1,6 +1,7 @@
 import pytest
 
-from backend.app import _RATE_WINDOWS, app, LEADERBOARD_DATA, _STORE
+from backend.app import app, LEADERBOARD_DATA, _STORE
+from backend.shared import _RATE_WINDOWS
 
 
 @pytest.fixture(autouse=True)

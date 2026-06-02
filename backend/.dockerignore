@@ -18,3 +18,16 @@ env/
 .gitignore
 *.log
 .DS_Store
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+tests/
+pytest/
+examples/
+docs/
+site/
+*.db
+*.db-journal

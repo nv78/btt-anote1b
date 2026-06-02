@@ -1,0 +1,15 @@
+{
+  "AWSEBDockerrunVersion": "1",
+  "Image": {
+    "Name": "<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/anote-leaderboard-backend:latest",
+    "Update": "true"
+  },
+  "Ports": [
+    {
+      "ContainerPort": 5000,
+      "HostPort": 80
+    }
+  ],
+  "Logging": "/var/log/eb-docker/containers/eb-current-app",
+  "Volumes": []
+}

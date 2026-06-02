@@ -40,13 +40,17 @@ const SAMPLE_OUTPUTS = {
   semantic_similarity:        ["0.92", "0.14", "0.78"],
 };
 
-const SampleJsonFormat = ({ taskType, sentenceIds }) => {
-  const [copied, setCopied] = React.useState(false);
+const buildSampleJson = (taskType, sentenceIds, allowedOutputs = []) => {
   const tt = (taskType || "text_classification").toLowerCase().replace(/-/g, "_");
   const outputs = SAMPLE_OUTPUTS[tt] || SAMPLE_OUTPUTS.text_classification;
   const ids = sentenceIds && sentenceIds.length ? sentenceIds : [0, 1, 2];
-  const sample = ids.slice(0, 3).map((id, i) => ({ id, output: outputs[i] || outputs[0] }));
-  const sampleStr = JSON.stringify(sample, null, 2);
+  const sample = ids.slice(0, 3).map((id, i) => ({ id, output: allowedOutputs[i % allowedOutputs.length] || outputs[i] || outputs[0] }));
+  return JSON.stringify(sample, null, 2);
+};
+
+const SampleJsonFormat = ({ taskType, sentenceIds, allowedOutputs = [] }) => {
+  const [copied, setCopied] = React.useState(false);
+  const sampleStr = buildSampleJson(taskType, sentenceIds, allowedOutputs);
 
   const copy = async () => {
     try {
@@ -77,6 +81,25 @@ const SampleJsonFormat = ({ taskType, sentenceIds }) => {
       <div className="px-4 py-2.5 bg-gray-900/50 border-t border-gray-700 text-xs text-gray-500 space-y-0.5">
         <div><code className="text-gray-400">id</code> — must match the question IDs from Step 2</div>
         <div><code className="text-gray-400">output</code> — your model's prediction for that question (also accepted: <code className="text-gray-400">prediction</code>, <code className="text-gray-400">answer</code>)</div>
+        {allowedOutputs.length > 0 && (
+          <div>Allowed outputs: {allowedOutputs.join(", ")}</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const AllowedOutputsPanel = ({ allowedOutputs = [] }) => {
+  if (!allowedOutputs.length) return null;
+  return (
+    <div className="rounded-xl border border-[#defe47]/30 bg-[#defe47]/5 p-4">
+      <div className="text-xs font-semibold text-[#defe47] mb-2">Allowed labels for this dataset</div>
+      <div className="flex flex-wrap gap-2">
+        {allowedOutputs.map((label) => (
+          <span key={label} className="px-2.5 py-1 rounded-md bg-gray-950 border border-gray-700 text-sm text-gray-100 font-mono">
+            {label}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -113,6 +136,7 @@ const SubmitToLeaderboard = ({
   const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [sentenceIds, setSentenceIds] = useState([]);
   const [sourceSentences, setSourceSentences] = useState([]);
+  const [questionOptions, setQuestionOptions] = useState([]);
   const [questionsHidden, setQuestionsHidden] = useState(null); // null | {count, message}
   const [translations, setTranslations] = useState([]);
   const [modelNameInput, setModelNameInput] = useState("");
@@ -130,14 +154,13 @@ const SubmitToLeaderboard = ({
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("leaderboard_api_key") || "");
   const [submitterId, setSubmitterId] = useState(() => localStorage.getItem("leaderboard_submitter_id") || "");
   const [submissionFormat, setSubmissionFormat] = useState(null);
-  const [submissionFormatOpen, setSubmissionFormatOpen] = useState(false);
-  const [copiedFormat, setCopiedFormat] = useState(false);
   const [dsSearch, setDsSearch] = useState("");
   const [submitMode, setSubmitMode] = useState("manual"); // 'manual' | 'csv' | 'json' | 'llm'
   const [copiedQuestions, setCopiedQuestions] = useState(""); // '' | 'text' | 'json'
   const [isPublic, setIsPublic] = useState(true);
   const [showPromptPanel, setShowPromptPanel] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [uploadedSubmissionFile, setUploadedSubmissionFile] = useState(null);
 
   // LLM runner state
   const [llmProvider, setLlmProvider] = useState(() => localStorage.getItem("llm_provider") || "openai");
@@ -187,25 +210,11 @@ const SubmitToLeaderboard = ({
     if (datasetKey) loadSubmissionFormat(datasetKey);
   }, [datasetKey]);
 
-  const fieldExplanations = [
-    ["benchmarkDatasetName", "The exact dataset name selected above."],
-    ["modelName", "A readable model or run identifier for the leaderboard row."],
-    ["submittedBy", "Optional contact or owner label shown with your submission."],
-    ["sentence_ids", "Dataset item ids being answered; length must match modelResults."],
-    ["modelResults", "Your model outputs, in the same order as sentence_ids."],
-    ["metadata", "Optional JSON object for version, prompt, or run notes."],
-  ];
-
-  const copySubmissionFormat = async () => {
-    if (!submissionFormat?.submit_model_body) return;
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(submissionFormat.submit_model_body, null, 2));
-      setCopiedFormat(true);
-      setTimeout(() => setCopiedFormat(false), 1500);
-    } catch {
-      setCopiedFormat(false);
-    }
-  };
+  const allowedOutputs = Array.isArray(submissionFormat?.allowed_outputs)
+    ? submissionFormat.allowed_outputs.map((label) => String(label)).filter(Boolean)
+    : [];
+  const hasDiscreteOutputs = allowedOutputs.length > 0;
+  const taskTypeNorm = (submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type || "").toLowerCase();
 
   // Load available datasets from backend
   useEffect(() => {
@@ -228,8 +237,10 @@ const SubmitToLeaderboard = ({
   const fetchSentences = async () => {
     setErrorMsg("");
     setSubmitResult(null);
-    setQuestionsHidden(null);
-    setLoadingFetch(true);
+      setQuestionsHidden(null);
+      setUploadedSubmissionFile(null);
+      setQuestionOptions([]);
+      setLoadingFetch(true);
     try {
       const url = new URL(`${API_BASE}/public/get_source_sentences`);
       url.searchParams.set("dataset_name", datasetKey);
@@ -241,15 +252,20 @@ const SubmitToLeaderboard = ({
         const n = data.question_count || 0;
         setQuestionsHidden({ count: n, message: data.error });
         setSentenceIds(Array.from({ length: n }, (_, i) => i));
+        setQuestionOptions([]);
         setTranslations(new Array(n).fill(""));
         return;
       }
       if (!res.ok || data.success !== true) {
         throw new Error(data.error || "Failed to fetch sentences");
       }
-      setSentenceIds(data.sentence_ids || []);
-      setSourceSentences(data.source_sentences || []);
-      setTranslations(new Array((data.source_sentences || []).length).fill(""));
+      const questions = Array.isArray(data.questions) ? data.questions : [];
+      const nextIds = data.sentence_ids || questions.map((q, idx) => q.id ?? idx);
+      const nextSources = data.source_sentences || questions.map((q) => q.input || "");
+      setSentenceIds(nextIds);
+      setSourceSentences(nextSources);
+      setQuestionOptions(questions.map((q) => Array.isArray(q.options) ? q.options : []));
+      setTranslations(new Array(nextSources.length).fill(""));
     } catch (e) {
       setErrorMsg(e.message || "Error fetching sentences");
     } finally {
@@ -286,7 +302,7 @@ const SubmitToLeaderboard = ({
         let polled = data;
         for (let i = 0; i < 120; i++) {
           await new Promise((r) => setTimeout(r, 400));
-          const pr = await fetch(`${API_BASE}/public/eval_jobs/${data.job_id}`);
+          const pr = await fetch(`${API_BASE}/public/eval_jobs/${data.job_id}`, { headers: buildHeaders() });
           polled = await pr.json();
           if (polled.status === "completed" && polled.success) {
             setSubmitResult({
@@ -295,6 +311,14 @@ const SubmitToLeaderboard = ({
               detailed_scores: polled.detailed_scores,
               submission_id: polled.submission_id,
             });
+            if (typeof window.gtag === "function") {
+              window.gtag("event", "model_submission", {
+                dataset: datasetKey,
+                model: modelNameInput.trim(),
+                mode: submitMode,
+                score: polled.score,
+              });
+            }
             return;
           }
           if (polled.status === "failed") {
@@ -312,10 +336,61 @@ const SubmitToLeaderboard = ({
         detailed_scores: data.detailed_scores,
         submission_id: data.submission_id,
       });
+      if (typeof window.gtag === "function") {
+        window.gtag("event", "model_submission", {
+          dataset: datasetKey,
+          model: modelNameInput.trim(),
+          mode: submitMode,
+          score: data.score,
+        });
+      }
     } catch (e) {
       setErrorMsg(e.message || "Error submitting model");
     } finally {
       setLoadingSubmit(false);
+    }
+  };
+
+  const modelNameFromFile = (file) => {
+    const fallback = file?.name || "";
+    return fallback.replace(/\.[^.]+$/, "").trim();
+  };
+
+  const applyParsedSubmissionFile = ({ modelResults, sentenceIds: ids }, file) => {
+    const cleanedResults = (modelResults || []).map((value) => String(value ?? ""));
+    const cleanedIds = (ids || []).map((value, idx) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : idx;
+    });
+    if (!cleanedResults.length) {
+      throw new Error("No answers found in the uploaded file");
+    }
+    if (cleanedIds.length !== cleanedResults.length) {
+      throw new Error("Uploaded ids and answers must have the same length");
+    }
+    setTranslations(cleanedResults);
+    setSentenceIds(cleanedIds);
+    setSourceSentences([]);
+    setQuestionOptions([]);
+    setUploadedSubmissionFile({
+      name: file?.name || "uploaded file",
+      count: cleanedResults.length,
+    });
+    setSubmitResult(null);
+    setErrorMsg("");
+    if (!modelNameInput.trim()) {
+      setModelNameInput(modelNameFromFile(file) || "uploaded-model");
+    }
+  };
+
+  const parseAndApplySubmissionFile = async (file, kind) => {
+    if (!file) return;
+    try {
+      const parsed = kind === "csv" ? await parseSubmissionCsv(file) : await parseSubmissionJson(file);
+      applyParsedSubmissionFile(parsed, file);
+    } catch (err) {
+      setUploadedSubmissionFile(null);
+      setErrorMsg(err.message || `Failed to parse ${kind.toUpperCase()}`);
     }
   };
 
@@ -446,20 +521,31 @@ const SubmitToLeaderboard = ({
     },
   };
 
-  const taskExample = TASK_EXAMPLES[
-    (submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type || "").toLowerCase()
-  ] || null;
+  const taskExample = TASK_EXAMPLES[taskTypeNorm] || null;
 
   const copyAllQuestions = async (format) => {
     if (!sourceSentences.length) return;
     let text;
     if (format === "json") {
       text = JSON.stringify(
-        sourceSentences.map((s, i) => ({ id: sentenceIds[i], question: s })),
+        sourceSentences.map((s, i) => ({
+          id: sentenceIds[i],
+          question: s,
+          ...(questionOptions[i]?.length ? { options: questionOptions[i] } : {}),
+          ...(allowedOutputs.length ? { allowed_outputs: allowedOutputs } : {}),
+        })),
         null, 2
       );
     } else {
-      text = sourceSentences.map((s, i) => `#${sentenceIds[i]}: ${s}`).join("\n\n");
+      text = sourceSentences.map((s, i) => {
+        const options = questionOptions[i]?.length
+          ? `\nOptions:\n${questionOptions[i].map((o) => `${o.label}) ${o.text}`).join("\n")}`
+          : "";
+        return `#${sentenceIds[i]}: ${s}${options}`;
+      }).join("\n\n");
+      if (allowedOutputs.length) {
+        text = `Allowed labels: ${allowedOutputs.join(", ")}\n\n${text}`;
+      }
     }
     try {
       await navigator.clipboard.writeText(text);
@@ -496,8 +582,17 @@ const SubmitToLeaderboard = ({
     const instruction = instructions[tt] ||
       "Complete the task for each item. Return ONLY a JSON array: [{\"id\": <n>, \"output\": \"<answer>\"}, ...]";
 
-    const items = sourceSentences.map((s, i) => `[${sentenceIds[i]}] ${s}`).join("\n");
-    return `${instruction}\n\nItems:\n${items}`;
+    const labelLine = allowedOutputs.length
+      ? `\nAllowed output labels for every item: ${allowedOutputs.join(", ")}\nUse exactly one of those labels when applicable.`
+      : "";
+    const items = sourceSentences.map((s, i) => {
+      const options = questionOptions[i]?.length
+        ? `\nOptions:\n${questionOptions[i].map((o) => `${o.label}) ${o.text}`).join("\n")}`
+        : "";
+      return `[${sentenceIds[i]}] ${s}${options}`;
+    }).join("\n");
+    const sampleJson = buildSampleJson(tt, sentenceIds.slice(0, 3), allowedOutputs);
+    return `${instruction}${labelLine}\n\nReturn JSON in exactly this shape:\n${sampleJson}\n\nItems:\n${items}`;
   };
 
   const copyLlmPrompt = async () => {
@@ -557,11 +652,19 @@ const SubmitToLeaderboard = ({
       // Poll
       for (let attempt = 0; attempt < 600; attempt++) {
         await new Promise((r) => setTimeout(r, 1500));
-        const pollRes = await fetch(`${API_BASE}/public/eval_jobs/${jid}`);
+        const pollRes = await fetch(`${API_BASE}/public/eval_jobs/${jid}`, { headers });
         const pollData = await pollRes.json();
         setLlmJobStatus(pollData);
         if (pollData.status === "completed") {
           setSubmitResult({ score: pollData.score, metric: pollData.metric, detailed_scores: pollData.detailed_scores, submission_id: pollData.submission_id });
+          if (typeof window.gtag === "function") {
+            window.gtag("event", "model_submission", {
+              dataset: datasetKey,
+              model: modelNameInput.trim(),
+              mode: "llm",
+              score: pollData.score,
+            });
+          }
           break;
         }
         if (pollData.status === "failed") {
@@ -616,11 +719,13 @@ const SubmitToLeaderboard = ({
         header: true,
         complete: (results) => {
           try {
-            const rows = (results.data || []).filter(Boolean);
+            const rows = (results.data || []).filter((row) => (
+              row && Object.values(row).some((value) => String(value ?? "").trim())
+            ));
             const modelResults = [];
             const ids = [];
             rows.forEach((r, idx) => {
-              const text = r.translation || r.Translations || r.output || r.prediction || r.Prediction || '';
+              const text = r.translation || r.Translations || r.output || r.Output || r.prediction || r.Prediction || r.answer || r.Answer || '';
               const sid = r.sentence_id != null ? Number(r.sentence_id) : (r.id != null ? Number(r.id) : (r.index != null ? Number(r.index) : idx));
               modelResults.push(String(text));
               ids.push(sid);
@@ -998,12 +1103,14 @@ const SubmitToLeaderboard = ({
                 type="button"
                 onClick={() => {
                   setDatasetKey(opt.value);
-                  setSelectedDatasetMeta({ task_type: opt.task_type, evaluation_metric: opt.evaluation_metric, size: opt.size });
-                  setSentenceIds([]);
-                  setSourceSentences([]);
+	                  setSelectedDatasetMeta({ task_type: opt.task_type, evaluation_metric: opt.evaluation_metric, size: opt.size });
+	                  setSentenceIds([]);
+	                  setSourceSentences([]);
+                  setQuestionOptions([]);
                   setTranslations([]);
+                  setUploadedSubmissionFile(null);
                   setSubmitResult(null);
-                }}
+	                }}
                 className={`text-left rounded-xl border p-3 transition-colors ${
                   datasetKey === opt.value
                     ? "border-[#defe47] bg-[#defe47]/5"
@@ -1075,10 +1182,12 @@ const SubmitToLeaderboard = ({
                   <pre className="text-sm text-[#defe47] whitespace-pre-wrap font-mono bg-black/20 rounded-lg px-3 py-2">{taskExample.output}</pre>
                 </div>
               </div>
-            </div>
-          )}
+	            </div>
+	          )}
 
-          <div className="flex items-center gap-3 mb-4">
+          <AllowedOutputsPanel allowedOutputs={allowedOutputs} />
+
+	          <div className="flex items-center gap-3 mb-4">
             <button
               type="button"
               onClick={fetchSentences}
@@ -1127,13 +1236,19 @@ const SubmitToLeaderboard = ({
                     >
                       {copiedQuestions === "json" ? "Copied!" : "Copy as JSON"}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const blob = new Blob([JSON.stringify(
-                          sourceSentences.map((s, i) => ({ id: sentenceIds[i], question: s, output: "" })),
-                          null, 2
-                        )], { type: "application/json" });
+	                    <button
+	                      type="button"
+	                      onClick={() => {
+	                        const blob = new Blob([JSON.stringify(
+                          sourceSentences.map((s, i) => ({
+                            id: sentenceIds[i],
+                            question: s,
+                            ...(questionOptions[i]?.length ? { options: questionOptions[i] } : {}),
+                            ...(allowedOutputs.length ? { allowed_outputs: allowedOutputs } : {}),
+                            output: "",
+                          })),
+	                          null, 2
+	                        )], { type: "application/json" });
                         const a = document.createElement("a");
                         a.href = URL.createObjectURL(blob);
                         a.download = `${datasetKey}_questions.json`;
@@ -1146,14 +1261,27 @@ const SubmitToLeaderboard = ({
                     </button>
                   </div>
                 </div>
-                <div className="divide-y divide-gray-800/60 max-h-64 overflow-y-auto">
-                  {sourceSentences.map((src, idx) => (
-                    <div key={idx} className="flex gap-3 px-4 py-3">
-                      <span className="text-xs text-gray-500 font-mono w-8 shrink-0 pt-0.5">#{sentenceIds[idx]}</span>
-                      <p className="text-sm text-gray-200 leading-relaxed">{src}</p>
-                    </div>
-                  ))}
-                </div>
+	                <div className="divide-y divide-gray-800/60 max-h-64 overflow-y-auto">
+	                  {sourceSentences.map((src, idx) => (
+	                    <div key={idx} className="flex gap-3 px-4 py-3">
+	                      <span className="text-xs text-gray-500 font-mono w-8 shrink-0 pt-0.5">#{sentenceIds[idx]}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm text-gray-200 leading-relaxed">{src}</p>
+                        {questionOptions[idx]?.length > 0 && (
+                          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {questionOptions[idx].map((option) => (
+                              <div key={`${sentenceIds[idx]}-${option.label}`} className="text-xs text-gray-300 bg-gray-950 border border-gray-800 rounded-md px-2 py-1">
+                                <span className="font-mono text-[#defe47]">{option.label}</span>
+                                <span className="text-gray-500 mx-1">-</span>
+                                <span>{option.text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+	                    </div>
+	                  ))}
+	                </div>
               </div>
               <p className="text-xs text-gray-500">
                 Fill in your model's answers below, then submit. The <code className="text-gray-400">output</code> field maps to your prediction for each question id.
@@ -1184,11 +1312,11 @@ const SubmitToLeaderboard = ({
                         {copiedPrompt ? "Copied!" : "Copy prompt"}
                       </button>
                     </div>
-                    <pre className="text-xs text-gray-300 bg-[#111827] border border-gray-800 rounded-lg p-3 overflow-auto max-h-72 whitespace-pre-wrap">
-                      {buildLlmPrompt()}
-                    </pre>
-                    <p className="text-xs text-gray-500 mt-2">
-                      Paste this into your LLM. It will return a JSON array — upload that using the <strong className="text-gray-300">JSON</strong> tab below,
+	                    <pre className="text-xs text-gray-300 bg-[#111827] border border-gray-800 rounded-lg p-3 overflow-auto max-h-72 whitespace-pre-wrap">
+	                      {buildLlmPrompt()}
+	                    </pre>
+		                    <p className="text-xs text-gray-500 mt-2">
+	                      Paste this into your LLM. It will return a JSON array — upload that using the <strong className="text-gray-300">JSON</strong> tab below,
                       or use <strong className="text-gray-300">Run with LLM</strong> to have us call the API for you automatically.
                     </p>
                   </div>
@@ -1196,57 +1324,24 @@ const SubmitToLeaderboard = ({
               </div>
 
               {/* Sample return format — always visible once questions are fetched */}
-              <SampleJsonFormat
-                taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
-                sentenceIds={sentenceIds.slice(0, 3)}
-              />
+	              <SampleJsonFormat
+	                taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
+	                sentenceIds={sentenceIds.slice(0, 3)}
+                allowedOutputs={allowedOutputs}
+	              />
             </>
           )}
 
           {/* Sample format even when questions are hidden */}
           {questionsHidden && (
-            <SampleJsonFormat
-              taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
-              sentenceIds={[0, 1, 2]}
-            />
+	            <SampleJsonFormat
+	              taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
+	              sentenceIds={[0, 1, 2]}
+              allowedOutputs={allowedOutputs}
+	            />
           )}
 
-          {/* Submission format accordion */}
-          {submissionFormat && (
-            <div className="mt-4 rounded-xl border border-gray-800 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setSubmissionFormatOpen((v) => !v)}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-300 hover:bg-white/[0.02]"
-              >
-                <span>
-                  Expected JSON format
-                  <span className="ml-2 text-xs text-gray-500">{submissionFormat.task_type_normalized} / {submissionFormat.evaluation_metric_normalized}</span>
-                </span>
-                <span className="text-[#defe47] text-xs">{submissionFormatOpen ? "Hide" : "Show"}</span>
-              </button>
-              {submissionFormatOpen && (
-                <div className="border-t border-gray-800 p-4 space-y-3">
-                  <div className="flex justify-end">
-                    <button type="button" onClick={copySubmissionFormat} className="text-xs px-3 py-1 rounded-md border border-[#defe47]/40 text-[#defe47] hover:bg-[#defe47]/10">
-                      {copiedFormat ? "Copied!" : "Copy"}
-                    </button>
-                  </div>
-                  <pre className="text-xs text-gray-300 bg-[#111827] border border-gray-800 rounded-lg p-3 overflow-auto max-h-60">
-                    {JSON.stringify(submissionFormat.submit_model_body, null, 2)}
-                  </pre>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {fieldExplanations.map(([field, explanation]) => (
-                      <div key={field} className="text-xs text-gray-400">
-                        <span className="font-mono text-gray-200">{field}</span>: {explanation}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
+	        </section>
 
         {/* ── Step 3: Submit Answers ── */}
         <section className="bg-[#0d1421] border border-gray-800 rounded-2xl p-6">
@@ -1292,8 +1387,8 @@ const SubmitToLeaderboard = ({
           </div>
 
           {/* Mode tabs */}
-          <div className="flex flex-wrap gap-1 mb-4 bg-gray-900 rounded-lg p-1 w-fit">
-            {[["manual", "Manual"], ["csv", "Upload CSV"], ["json", "Upload JSON"], ["llm", "✦ Run with LLM"]].map(([mode, label]) => (
+	          <div className="flex flex-wrap gap-1 mb-4 bg-gray-900 rounded-lg p-1 w-fit">
+	            {[["manual", "Manual"], ["csv", "Upload CSV"], ["json", "Upload JSON"], ["llm", "✦ Run with LLM"]].map(([mode, label]) => (
               <button
                 key={mode}
                 type="button"
@@ -1305,35 +1400,67 @@ const SubmitToLeaderboard = ({
                 }`}
               >
                 {label}
-              </button>
-            ))}
-          </div>
+	              </button>
+	            ))}
+	          </div>
 
-          {/* Manual mode */}
+          <AllowedOutputsPanel allowedOutputs={allowedOutputs} />
+
+	          {/* Manual mode */}
           {submitMode === "manual" && (
             <div className="space-y-3">
               {sourceSentences.length === 0 && (
                 <p className="text-sm text-gray-500">Fetch questions in Step 2 first, then enter your answers here.</p>
               )}
-              {sourceSentences.map((src, idx) => (
-                <div key={idx} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <div className="flex gap-3 mb-2">
-                    <span className="text-xs text-gray-500 font-mono w-8 shrink-0 pt-0.5">#{sentenceIds[idx]}</span>
-                    <p className="text-sm text-gray-300 leading-relaxed">{src}</p>
-                  </div>
-                  <textarea
-                    rows={2}
-                    placeholder="Your model's output…"
-                    value={translations[idx] || ""}
-                    onChange={(e) => {
-                      const next = [...translations];
-                      next[idx] = e.target.value;
-                      setTranslations(next);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg bg-[#111827] border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50 resize-none"
-                  />
-                </div>
-              ))}
+	              {sourceSentences.map((src, idx) => (
+	                <div key={idx} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+	                  <div className="flex gap-3 mb-2">
+	                    <span className="text-xs text-gray-500 font-mono w-8 shrink-0 pt-0.5">#{sentenceIds[idx]}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-300 leading-relaxed">{src}</p>
+                      {questionOptions[idx]?.length > 0 && (
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {questionOptions[idx].map((option) => (
+                            <div key={`${sentenceIds[idx]}-${option.label}-manual`} className="text-xs text-gray-300 bg-[#111827] border border-gray-800 rounded-md px-2 py-1">
+                              <span className="font-mono text-[#defe47]">{option.label}</span>
+                              <span className="text-gray-500 mx-1">-</span>
+                              <span>{option.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+	                  </div>
+                  {hasDiscreteOutputs ? (
+                    <select
+                      value={translations[idx] || ""}
+                      onChange={(e) => {
+                        const next = [...translations];
+                        next[idx] = e.target.value;
+                        setTranslations(next);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg bg-[#111827] border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50"
+                    >
+                      <option value="">Choose a label...</option>
+                      {allowedOutputs.map((label) => (
+                        <option key={label} value={label}>{label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <textarea
+                      rows={2}
+                      placeholder="Your model's output..."
+                      value={translations[idx] || ""}
+                      onChange={(e) => {
+                        const next = [...translations];
+                        next[idx] = e.target.value;
+                        setTranslations(next);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg bg-[#111827] border border-gray-700 text-white text-sm focus:outline-none focus:border-[#defe47]/50 resize-none"
+                    />
+                  )}
+	                </div>
+	              ))}
             </div>
           )}
 
@@ -1348,13 +1475,7 @@ const SubmitToLeaderboard = ({
                   e.preventDefault();
                   const f = e.dataTransfer.files?.[0];
                   if (!f) return;
-                  try {
-                    const { modelResults, sentenceIds: ids } = await parseSubmissionCsv(f);
-                    setTranslations(modelResults);
-                    setSentenceIds(ids);
-                    setSourceSentences([]);
-                    setErrorMsg("");
-                  } catch { setErrorMsg("Failed to parse CSV"); }
+                  await parseAndApplySubmissionFile(f, "csv");
                 }}
               >
                 <svg className="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1372,13 +1493,7 @@ const SubmitToLeaderboard = ({
                   onChange={async (e) => {
                     const f = e.target.files?.[0];
                     if (!f) return;
-                    try {
-                      const { modelResults, sentenceIds: ids } = await parseSubmissionCsv(f);
-                      setTranslations(modelResults);
-                      setSentenceIds(ids);
-                      setSourceSentences([]);
-                      setErrorMsg("");
-                    } catch { setErrorMsg("Failed to parse CSV"); }
+                    await parseAndApplySubmissionFile(f, "csv");
                   }}
                 />
               </div>
@@ -1399,8 +1514,11 @@ const SubmitToLeaderboard = ({
               >
                 Download CSV template
               </button>
-              {translations.length > 0 && (
-                <p className="text-xs text-green-400">{translations.length} rows loaded from CSV.</p>
+              {uploadedSubmissionFile && submitMode === "csv" && (
+                <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
+                  Loaded {uploadedSubmissionFile.count} rows from <span className="font-semibold">{uploadedSubmissionFile.name}</span>.
+                  {!modelNameInput.trim() ? " Add a model name to submit." : " Ready to submit."}
+                </div>
               )}
             </div>
           )}
@@ -1416,13 +1534,7 @@ const SubmitToLeaderboard = ({
                   e.preventDefault();
                   const f = e.dataTransfer.files?.[0];
                   if (!f) return;
-                  try {
-                    const { modelResults, sentenceIds: ids } = await parseSubmissionJson(f);
-                    setTranslations(modelResults);
-                    setSentenceIds(ids);
-                    setSourceSentences([]);
-                    setErrorMsg("");
-                  } catch (err) { setErrorMsg(err.message || "Failed to parse JSON"); }
+                  await parseAndApplySubmissionFile(f, "json");
                 }}
               >
                 <svg className="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1442,27 +1554,19 @@ const SubmitToLeaderboard = ({
                   onChange={async (e) => {
                     const f = e.target.files?.[0];
                     if (!f) return;
-                    try {
-                      const { modelResults, sentenceIds: ids } = await parseSubmissionJson(f);
-                      setTranslations(modelResults);
-                      setSentenceIds(ids);
-                      setSourceSentences([]);
-                      setErrorMsg("");
-                    } catch (err) { setErrorMsg(err.message || "Failed to parse JSON"); }
+                    await parseAndApplySubmissionFile(f, "json");
                   }}
                 />
               </div>
-              {translations.length > 0 && (
-                <p className="text-xs text-green-400">{translations.length} answers loaded from JSON.</p>
+              {uploadedSubmissionFile && submitMode === "json" && (
+                <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
+                  Loaded {uploadedSubmissionFile.count} answers from <span className="font-semibold">{uploadedSubmissionFile.name}</span>.
+                  {!modelNameInput.trim() ? " Add a model name to submit." : " Ready to submit."}
+                </div>
               )}
 
-              {/* Sample return format */}
-              <SampleJsonFormat
-                taskType={submissionFormat?.task_type_normalized || selectedDatasetMeta.task_type}
-                sentenceIds={sentenceIds.slice(0, 3)}
-              />
-            </div>
-          )}
+	            </div>
+	          )}
 
           {/* ── Run with LLM tab ── */}
           {submitMode === "llm" && (
@@ -1601,6 +1705,9 @@ const SubmitToLeaderboard = ({
             </button>
             {!sentenceIds.length && (
               <p className="text-xs text-gray-500">Fetch questions or upload a file first.</p>
+            )}
+            {sentenceIds.length > 0 && !modelNameInput.trim() && (
+              <p className="text-xs text-gray-500">Add a model name to enable submission.</p>
             )}
           </div>
           )}

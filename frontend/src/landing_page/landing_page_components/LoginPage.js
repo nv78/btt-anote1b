@@ -15,7 +15,10 @@ export default function LoginPage() {
       sessionStorage.setItem("lb_oauth_return", st);
     }
   }, [location.state]);
-  const googleStart = `${API_BASE}/public/auth/google/start`;
+  const frontendOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const googleStart = `${API_BASE}/public/auth/google/start${
+    frontendOrigin ? `?frontend_url=${encodeURIComponent(frontendOrigin)}` : ""
+  }`;
 
   return (
     <div className="min-h-screen bg-[#111827] text-gray-100 py-16 px-4">

@@ -1,15 +1,31 @@
-from flask import Blueprint, Response, current_app, request, jsonify, redirect
+from flask import Blueprint, Response, current_app, request, jsonify, redirect, session
 
 from shared import *
 
 bp = Blueprint("auth", __name__)
 app = bp
 
+
+def _allowed_frontend_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        from app import _allowed_origins  # type: ignore
+    except ImportError:
+        try:
+            from backend.app import _allowed_origins  # type: ignore
+        except ImportError:
+            return False
+    return url.rstrip("/") in {origin.rstrip("/") for origin in _allowed_origins()}
+
 @bp.get("/public/auth/google/start")
 def google_oauth_start():
     """Begin Google OAuth (requires ``GOOGLE_CLIENT_ID`` and Authlib)."""
     if _OAUTH is None:
         return jsonify({"success": False, "error": "OAuth not configured"}), 501
+    frontend_url = (request.args.get("frontend_url") or "").strip().rstrip("/")
+    if frontend_url and _allowed_frontend_url(frontend_url):
+        session["leaderboard_frontend_url"] = frontend_url
     # Prefer deriving redirect_uri from this request so localhost vs 127.0.0.1 matches Google Console.
     # Optional LEADERBOARD_OAUTH_PUBLIC_BASE_URL=https://api.example.com when TLS terminates at proxy (wrong Host in Flask).
     public_base = os.getenv("LEADERBOARD_OAUTH_PUBLIC_BASE_URL", "").strip().rstrip("/")
@@ -58,5 +74,8 @@ def google_oauth_callback():
     except Exception as e:
         logger.exception("jwt_issue_failed", extra={"error": str(e)})
         return jsonify({"success": False, "error": "Token issue failed"}), 500
-    front = os.getenv("LEADERBOARD_FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    front = (
+        session.pop("leaderboard_frontend_url", None)
+        or os.getenv("LEADERBOARD_FRONTEND_URL", "http://localhost:3000")
+    ).rstrip("/")
     return redirect(f"{front}/oauth/callback#access_token={quote(jwt_token, safe='')}")

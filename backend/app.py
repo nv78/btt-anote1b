@@ -34,9 +34,18 @@ def _allowed_origins() -> list[str]:
 
 def create_app() -> Flask:
     flask_app = Flask(__name__)
-    flask_app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-insecure-change-me")
+    secret_key = os.getenv("FLASK_SECRET_KEY", "")
+    if not secret_key:
+        if os.getenv("FLASK_ENV", "development").lower() != "development":
+            raise RuntimeError("FLASK_SECRET_KEY must be set in production")
+        secret_key = "dev-insecure-change-me"
+    flask_app.secret_key = secret_key
     flask_app.config["JSON_SORT_KEYS"] = False
-    CORS(flask_app, resources={r"/*": {"origins": _allowed_origins()}})
+    CORS(flask_app, resources={r"/*": {
+        "origins": _allowed_origins(),
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-API-Key", "X-Admin-Key"],
+    }})
 
     oauth = shared._init_google_oauth(flask_app)
     shared._OAUTH = oauth
@@ -44,6 +53,19 @@ def create_app() -> Flask:
     flask_app.after_request(shared.add_compatible_response_envelope)
     for mod in _BLUEPRINT_MODULES:
         flask_app.register_blueprint(mod.bp)
+
+    @flask_app.errorhandler(404)
+    def _not_found(e):
+        return jsonify({"success": False, "error": "Not found"}), 404
+
+    @flask_app.errorhandler(405)
+    def _method_not_allowed(e):
+        return jsonify({"success": False, "error": "Method not allowed"}), 405
+
+    @flask_app.errorhandler(500)
+    def _internal_error(e):
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
     return flask_app
 
 
@@ -66,6 +88,8 @@ def index():
             "/public/get_source_sentences",
             "/public/submission_format",
             "/public/dataset_details",
+            "/public/model_names",
+            "/public/compare_models",
             "/public/submit_model",
             "/public/eval_jobs/<job_id>",
             "/public/my_submissions",

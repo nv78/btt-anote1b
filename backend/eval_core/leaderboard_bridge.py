@@ -312,11 +312,33 @@ def submission_format_for_dataset(
     task_norm = normalize_task_type(task_type)
     metric_norm = normalize_eval_metric(evaluation_metric, task_norm)
     example_ids = list(range(min(n, 4))) if n else [0, 1, 2]
+    allowed_outputs: List[str] = []
+    if task_norm in {"text_classification", "natural_language_inference", "fact_verification", "multiple_choice_qa"}:
+        for key in ("label_names", "class_names", "classes", "allowed_outputs", "output_labels"):
+            values = rd.get(key)
+            if isinstance(values, list):
+                allowed_outputs = [str(v).strip() for v in values if str(v).strip()]
+                break
+        if not allowed_outputs and isinstance(rd.get("labels"), list):
+            seen = set()
+            for raw in rd.get("labels") or []:
+                values = raw if isinstance(raw, list) else [raw]
+                for value in values:
+                    label = str(value).strip()
+                    if label and label not in seen:
+                        seen.add(label)
+                        allowed_outputs.append(label)
+        if task_norm == "natural_language_inference" and not allowed_outputs:
+            allowed_outputs = ["entailment", "neutral", "contradiction"]
+        elif task_norm == "fact_verification" and not allowed_outputs:
+            allowed_outputs = ["supported", "refuted", "not enough info"]
+        elif task_norm == "multiple_choice_qa" and not allowed_outputs:
+            allowed_outputs = ["A", "B", "C", "D"]
 
     placeholder_results: List[str] = []
     for _ in example_ids:
         if task_norm == "text_classification":
-            placeholder_results.append("<predicted_label>")
+            placeholder_results.append(allowed_outputs[0] if allowed_outputs else "<predicted_label>")
         elif task_norm == "named_entity_recognition":
             placeholder_results.append("ENTITY_ONE; ENTITY_TWO")
         elif task_norm in ("document_qa", "line_qa"):
@@ -332,6 +354,7 @@ def submission_format_for_dataset(
         "evaluation_metric": evaluation_metric,
         "evaluation_metric_normalized": metric_norm,
         "dataset_size": n,
+        "allowed_outputs": allowed_outputs,
         "reference_data_keys": sorted(rd.keys()),
         "submit_model_body": {
             "benchmarkDatasetName": name,

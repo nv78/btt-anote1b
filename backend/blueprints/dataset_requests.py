@@ -32,6 +32,25 @@ def request_dataset():
         )
         conn.commit()
         req_id = cursor.lastrowid
+        # Fire-and-forget emails (no-op if not configured)
+        try:
+            from email_notifications import send_dataset_request_confirmation, send_dataset_request_admin_alert
+        except ImportError:
+            from backend.email_notifications import send_dataset_request_confirmation, send_dataset_request_admin_alert  # type: ignore
+        send_dataset_request_confirmation(
+            requested_by,
+            dataset_name=dataset_name,
+            task_type=task_type,
+            description=description,
+            request_id=req_id,
+        )
+        send_dataset_request_admin_alert(
+            dataset_name=dataset_name,
+            task_type=task_type,
+            requested_by=requested_by,
+            description=description,
+            request_id=req_id,
+        )
         return jsonify({"success": True, "id": req_id, "status": "pending"}), 201
     except Exception:
         logger.exception("dataset_request_insert_failed")

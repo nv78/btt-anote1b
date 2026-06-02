@@ -123,6 +123,8 @@ const MySubmissions = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(null); // submission_id pending delete
   const [actionBusy, setActionBusy] = useState({}); // {id: true} when delete/toggle in flight
   const [filterDataset, setFilterDataset] = useState("");
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareSelected, setCompareSelected] = useState([]); // up to 2 submission_ids
 
   const estimateQuota = (submissionRows) => {
     const today = new Date().toISOString().slice(0, 10);
@@ -134,11 +136,12 @@ const MySubmissions = () => {
     setError("");
     setNextCursor(null);
     const jwt = getLeaderboardJwt();
-    if (!submitterId.trim() && !jwt) {
+    const hasSubmitterLookup = apiKey.trim() && submitterId.trim();
+    if (!jwt && !hasSubmitterLookup) {
       setRows([]);
       setTotal(0);
       setQuota(null);
-      setError("Sign in with Google or set a Submitter ID on the Submit page to view your submissions.");
+      setError("Sign in with Google, or set both an API key and Submitter ID on the Submit page to view your submissions.");
       setLoading(false);
       return;
     }
@@ -147,6 +150,7 @@ const MySubmissions = () => {
       if (submitterId.trim()) qs.set("submitter_id", submitterId.trim());
       const res = await fetch(`${API_BASE}/public/my_submissions?${qs}`, { headers: authHeaders(apiKey) });
       const data = await res.json();
+      if (res.status === 401) throw new Error("Session expired — please sign in again to view your submissions.");
       if (!res.ok || data.success !== true) throw new Error(data.error || "Failed to load");
       const submissionRows = data.submissions || [];
       setRows(submissionRows);
@@ -206,7 +210,13 @@ const MySubmissions = () => {
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || "Delete failed");
-      setRows((prev) => prev.filter((r) => r.submission_id !== id));
+      setRows((prev) => {
+        const deleted = prev.find((r) => r.submission_id === id);
+        if (typeof window.gtag === "function") {
+          window.gtag("event", "submission_deleted", { dataset: deleted?.dataset_name, model: deleted?.model_name });
+        }
+        return prev.filter((r) => r.submission_id !== id);
+      });
       setTotal((t) => Math.max(0, t - 1));
     } catch (e) {
       setError(e.message);
@@ -228,6 +238,14 @@ const MySubmissions = () => {
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || "Update failed");
+      if (typeof window.gtag === "function") {
+        const row = rows.find((r) => r.submission_id === id);
+        window.gtag("event", "submission_visibility_changed", {
+          dataset: row?.dataset_name,
+          model: row?.model_name,
+          is_public: !currentlyPublic,
+        });
+      }
       setRows((prev) =>
         prev.map((r) => r.submission_id === id ? { ...r, is_public: data.is_public } : r)
       );
@@ -237,6 +255,18 @@ const MySubmissions = () => {
       setActionBusy((p) => ({ ...p, [`vis-${id}`]: false }));
     }
   };
+
+  // ── Compare mode ─────────────────────────────────────────────────────────
+
+  const toggleCompareSelect = (id) => {
+    setCompareSelected((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1], id]; // replace oldest
+      return [...prev, id];
+    });
+  };
+
+  const exitCompare = () => { setCompareMode(false); setCompareSelected([]); };
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -254,6 +284,17 @@ const MySubmissions = () => {
   const quotaUsed = quota ? Math.min(quotaLimit, quota.used_today || 0) : 0;
   const quotaPercent = quotaLimit > 0 ? Math.min(100, (quotaUsed / quotaLimit) * 100) : 0;
 
+  // Compare panel data
+  const compareRows = compareSelected
+    .map((id) => rows.find((r) => r.submission_id === id))
+    .filter(Boolean);
+  const allMetricKeys = compareRows.length === 2
+    ? [...new Set([
+        ...Object.keys(compareRows[0].detailed_scores || {}),
+        ...Object.keys(compareRows[1].detailed_scores || {}),
+      ])].filter((k) => !["ci_low", "ci_high"].includes(k))
+    : [];
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -268,13 +309,27 @@ const MySubmissions = () => {
               Track your model performance across benchmarks. Private submissions are hidden from the public leaderboard.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setShowChart((v) => !v)}
+              onClick={() => setShowChart((v) => {
+                if (!v && typeof window.gtag === "function") window.gtag("event", "score_chart_opened");
+                return !v;
+              })}
               className="text-sm px-3 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-white/5"
             >
               {showChart ? "Hide chart" : "Score history"}
+            </button>
+            <button
+              type="button"
+              onClick={() => compareMode ? exitCompare() : setCompareMode(true)}
+              className={`text-sm px-3 py-2 rounded-lg border transition-colors ${
+                compareMode
+                  ? "border-purple-500/60 text-purple-300 bg-purple-500/10"
+                  : "border-gray-600 text-gray-300 hover:bg-white/5"
+              }`}
+            >
+              {compareMode ? "Exit compare" : "⇄ Compare"}
             </button>
             <button
               type="button"
@@ -296,6 +351,98 @@ const MySubmissions = () => {
         {showChart && chartData.length === 0 && (
           <div className="mb-6 rounded-lg border border-gray-800 bg-[#0d1421] p-4 text-sm text-gray-500">
             No scored submissions yet to chart.
+          </div>
+        )}
+
+        {/* Compare mode instruction banner */}
+        {compareMode && compareSelected.length < 2 && (
+          <div className="mb-4 rounded-lg border border-purple-500/30 bg-purple-500/10 p-3 text-sm text-purple-200">
+            {compareSelected.length === 0
+              ? "Select two submissions below to compare their metrics side-by-side."
+              : "Select one more submission to compare."}
+          </div>
+        )}
+
+        {/* Compare panel */}
+        {compareMode && compareRows.length === 2 && (
+          <div className="mb-6 rounded-xl border border-purple-500/30 bg-[#0d1421] overflow-hidden">
+            <div className="px-5 py-3 border-b border-purple-500/20 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-white">Submission comparison</h2>
+              <button
+                type="button"
+                onClick={() => setCompareSelected([])}
+                className="text-xs text-gray-500 hover:text-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+            {/* Header row: the two submissions */}
+            <div className="grid grid-cols-[1fr_1fr_1fr] divide-x divide-gray-800 border-b border-gray-800">
+              <div className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Metric</div>
+              {compareRows.map((r, i) => (
+                <div key={i} className="px-4 py-3">
+                  <div className="text-xs font-semibold text-white truncate">{r.model_name}</div>
+                  <div className="text-xs text-gray-500 truncate">{r.dataset_name}</div>
+                  <div className="text-xs text-gray-600">{(r.submitted_at || "").slice(0, 10)}</div>
+                </div>
+              ))}
+            </div>
+            {/* Primary score row */}
+            <div className="grid grid-cols-[1fr_1fr_1fr] divide-x divide-gray-800 border-b border-gray-800 bg-gray-900/30">
+              <div className="px-4 py-3 text-xs font-mono text-gray-400">primary score</div>
+              {compareRows.map((r, i) => {
+                const other = compareRows[1 - i];
+                const better = typeof r.score === "number" && typeof other.score === "number" && r.score > other.score;
+                const diff = typeof r.score === "number" && typeof other.score === "number"
+                  ? (r.score - other.score).toFixed(4) : null;
+                return (
+                  <div key={i} className={`px-4 py-3 ${better ? "bg-green-500/5" : ""}`}>
+                    <span className={`text-base font-bold tabular-nums ${better ? "text-[#defe47]" : "text-gray-300"}`}>
+                      {formatScore(r.score)}
+                    </span>
+                    {diff !== null && i === 0 && (
+                      <span className={`ml-2 text-xs tabular-nums ${Number(diff) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {Number(diff) >= 0 ? "+" : ""}{diff}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Per-metric rows */}
+            {allMetricKeys.map((key) => {
+              const vals = compareRows.map((r) => (r.detailed_scores || {})[key]);
+              const numVals = vals.map(Number);
+              const allNum = vals.every((v) => typeof v === "number" || !isNaN(Number(v)));
+              const winner = allNum && numVals[0] !== numVals[1]
+                ? (numVals[0] > numVals[1] ? 0 : 1) : null;
+              const diff = allNum && vals.every((v) => v != null)
+                ? (numVals[0] - numVals[1]).toFixed(4) : null;
+              return (
+                <div key={key} className="grid grid-cols-[1fr_1fr_1fr] divide-x divide-gray-800 border-t border-gray-800/60">
+                  <div className="px-4 py-2.5 text-xs font-mono text-gray-400">{key}</div>
+                  {compareRows.map((r, i) => {
+                    const v = (r.detailed_scores || {})[key];
+                    const isWinner = winner === i;
+                    return (
+                      <div key={i} className={`px-4 py-2.5 ${isWinner ? "bg-green-500/5" : ""}`}>
+                        <span className={`text-xs tabular-nums font-mono ${isWinner ? "text-green-300" : "text-gray-400"}`}>
+                          {v != null ? (typeof v === "number" ? formatScore(v) : String(v)) : "—"}
+                        </span>
+                        {diff !== null && i === 0 && (
+                          <span className={`ml-2 text-xs tabular-nums ${Number(diff) >= 0 ? "text-green-500/70" : "text-red-500/70"}`}>
+                            {Number(diff) >= 0 ? "+" : ""}{diff}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {allMetricKeys.length === 0 && (
+              <div className="px-4 py-4 text-sm text-gray-600 italic">No detailed metrics to compare.</div>
+            )}
           </div>
         )}
 
@@ -391,11 +538,14 @@ const MySubmissions = () => {
             const isPublic = r.is_public !== false && r.is_public !== 0;
             const visLoading = actionBusy[`vis-${r.submission_id}`];
             const delLoading = actionBusy[r.submission_id];
+            const isSelected = compareSelected.includes(r.submission_id);
 
             return (
               <div
                 key={key}
-                className="bg-[#0d1421] border border-gray-800 rounded-lg overflow-hidden"
+                className={`bg-[#0d1421] border rounded-lg overflow-hidden transition-colors ${
+                  compareMode && isSelected ? "border-purple-500/60" : "border-gray-800"
+                }`}
               >
                 {/* Row header */}
                 <div className="p-4 flex flex-col gap-1">
@@ -422,6 +572,20 @@ const MySubmissions = () => {
 
                     {/* Action buttons */}
                     <div className="flex items-center gap-2 shrink-0 ml-2">
+                      {/* Compare select */}
+                      {compareMode && (
+                        <button
+                          type="button"
+                          onClick={() => toggleCompareSelect(r.submission_id)}
+                          className={`text-xs px-2 py-1 rounded-md border transition-colors ${
+                            isSelected
+                              ? "border-purple-500/60 text-purple-300 bg-purple-500/10"
+                              : "border-gray-700 text-gray-500 hover:border-purple-500/40 hover:text-purple-400"
+                          }`}
+                        >
+                          {isSelected ? "✓ Selected" : "Select"}
+                        </button>
+                      )}
                       {/* Public/private toggle */}
                       <button
                         type="button"

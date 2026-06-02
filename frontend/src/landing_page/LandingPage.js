@@ -21,8 +21,9 @@ import RequestDataset from "./landing_page_components/RequestDataset";
 import AdminDatasetRequests from "./landing_page_components/AdminDatasetRequests";
 import AddDataset from "./landing_page_components/AddDataset";
 import DatasetDetails from "./landing_page_components/DatasetDetails";
-import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, adminSubmissionsPath, adminDatasetRequestsPath, requestDatasetPath, evaluationsPath, csvBenchmarksPath, addDatasetPath, loginPath, oauthCallbackPath, createLeaderboardPath } from "../constants/RouteConstants";
+import { submittoleaderboardPath, mySubmissionsPath, adminLeaderboardPath, adminSubmissionsPath, adminDatasetRequestsPath, requestDatasetPath, evaluationsPath, csvBenchmarksPath, addDatasetPath, loginPath, oauthCallbackPath, createLeaderboardPath, compareModelsPath } from "../constants/RouteConstants";
 import MySubmissions from "./landing_page_components/MySubmissions";
+import ModelComparison from "./landing_page_components/ModelComparison";
 import HeaderBar from "./landing_page_components/HeaderBar";
 import CsvBenchmarksDemo from "./landing_page_components/CsvBenchmarksDemo";
 import AuthGuard from "./landing_page_components/AuthGuard";
@@ -81,6 +82,7 @@ function LandingPage() {
           <Route path={addDatasetPath} index element={<AuthGuard><AddDataset /></AuthGuard>} />,
           <Route path={createLeaderboardPath} index element={<AuthGuard><CreateLeaderboardFromHF /></AuthGuard>} />,
           <Route path="/dataset/:name" element={<DatasetDetails />} />,
+          <Route path={compareModelsPath} element={<ModelComparison />} />,
           <Route path={requestDatasetPath} index element={<RequestDataset />} />,
           <Route path={adminLeaderboardPath} index element={<AuthGuard><AdminLeaderboardManager /></AuthGuard>} />,
           <Route path={adminSubmissionsPath} index element={<AuthGuard><AdminSubmissionsModeration /></AuthGuard>} />,

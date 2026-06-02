@@ -32,7 +32,7 @@ def decode_leaderboard_bearer_token(token: str) -> Optional[Dict[str, Any]]:
             signing_key = jwks.get_signing_key_from_jwt(token)
             kwargs: Dict[str, Any] = {
                 "algorithms": ["RS256", "ES256"],
-                "options": {"require": ["sub"]},
+                "options": {"require": ["sub"], "verify_exp": True},
             }
             if issuer:
                 kwargs["issuer"] = issuer
@@ -48,7 +48,7 @@ def decode_leaderboard_bearer_token(token: str) -> Optional[Dict[str, Any]]:
                 token,
                 secret,
                 algorithms=["HS256"],
-                options={"require": ["sub"]},
+                options={"require": ["sub"], "verify_exp": True},
             )
         except Exception:
             return None

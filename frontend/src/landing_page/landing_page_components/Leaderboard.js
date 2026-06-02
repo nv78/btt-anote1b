@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import IconButton from "@mui/material/IconButton";
 import Skeleton from "@mui/material/Skeleton";
-import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath } from "../../constants/RouteConstants";
+import { addDatasetPath, csvBenchmarksPath, evaluationsPath, submittoleaderboardPath, compareModelsPath } from "../../constants/RouteConstants";
 import { useNavigate } from "react-router-dom";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 
@@ -1688,8 +1688,24 @@ const Leaderboard = () => {
             </IconButton>
           </div>
           <p className="mt-4 text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed">
-            Compare models, submit results, and track model performance.
+            Submit results, compare models, and track performance.
           </p>
+          <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={() => navigate(submittoleaderboardPath)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#defe47] text-black text-sm font-semibold hover:bg-[#e8ff70] transition-colors"
+            >
+              Submit a model
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(compareModelsPath)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#28b2fb]/50 text-[#28b2fb] text-sm font-semibold hover:bg-[#28b2fb]/10 transition-colors"
+            >
+              ⇄ Compare models
+            </button>
+          </div>
         </div>
       </header>
 

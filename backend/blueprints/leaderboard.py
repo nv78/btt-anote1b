@@ -5,6 +5,37 @@ from shared import *
 bp = Blueprint("leaderboard", __name__)
 app = bp
 
+
+def _public_question_options(row: dict[str, Any]) -> list[dict[str, str]]:
+    raw = row.get("options") or row.get("choices") or row.get("answer_choices")
+    if raw is None:
+        keyed = []
+        for letter in ("A", "B", "C", "D", "E", "F"):
+            value = row.get(letter) or row.get(letter.lower())
+            if value is not None:
+                keyed.append({"label": letter, "text": str(value)})
+        return keyed
+    if isinstance(raw, dict):
+        return [
+            {"label": str(key), "text": str(value)}
+            for key, value in raw.items()
+            if value is not None
+        ]
+    if isinstance(raw, list):
+        options = []
+        for idx, value in enumerate(raw):
+            fallback = chr(ord("A") + idx)
+            if isinstance(value, dict):
+                label = value.get("label") or value.get("letter") or value.get("key") or fallback
+                text = value.get("text") or value.get("value") or value.get("option") or ""
+                if text:
+                    options.append({"label": str(label), "text": str(text)})
+            elif value is not None:
+                options.append({"label": fallback, "text": str(value)})
+        return options
+    return []
+
+
 @bp.get('/public/submission_format')
 def submission_format():
     """Return expected POST /public/submit_model JSON shape for a dataset name."""
@@ -87,11 +118,15 @@ def _questions_from_reference_data(reference_data: object) -> list[dict[str, Any
                 or ""
             )
             context = row.get("context") or row.get("passage") or row.get("document")
-            items.append({
+            item = {
                 "id": int(row.get("id", idx)) if str(row.get("id", idx)).isdigit() else idx,
                 "input": str(input_text),
                 "context": str(context) if context is not None else None,
-            })
+            }
+            options = _public_question_options(row)
+            if options:
+                item["options"] = options
+            items.append(item)
         return items
 
     source_texts = reference_data.get("source_texts")
@@ -203,7 +238,7 @@ def _leaderboard_row_after_anchor(row: dict[str, Any], dataset_filter: str | Non
 def _leaderboard_data_rows(dataset_filter: str | None, represented: set[tuple[str, str]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     synthetic_id = -1
-    for dataset in LEADERBOARD_DATA:
+    for dataset in list(LEADERBOARD_DATA):  # snapshot to avoid RuntimeError on concurrent mutation
         dataset_name = dataset.get("name")
         if not dataset_name or (dataset_filter and dataset_name != dataset_filter):
             continue
@@ -229,6 +264,7 @@ def _leaderboard_data_rows(dataset_filter: str | None, represented: set[tuple[st
                 "evaluation_metric": metric,
                 "score": float(model.get("score") or 0),
                 "submitted_by": model.get("submitted_by") or "seed_real_benchmarks@anote.ai",
+                "is_public": True,
                 "metadata": {
                     "source": "LEADERBOARD_DATA",
                     "rank": model.get("rank"),
@@ -303,8 +339,17 @@ def get_leaderboard():
     """
     dataset_filter = request.args.get("dataset")
     cursor_token = (request.args.get("cursor") or "").strip()
-    page = max(1, int(request.args.get("page", 1)))
-    page_size = min(100, max(1, int(request.args.get("page_size", request.args.get("limit", 25)))))
+    try:
+        page = parse_bounded_int(request.args.get("page"), "page", 1, min_value=1)
+        page_size = parse_bounded_int(
+            request.args.get("page_size", request.args.get("limit")),
+            "page_size",
+            25,
+            min_value=1,
+            max_value=100,
+        )
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     offset = (page - 1) * page_size
     use_cursor = bool(cursor_token)
     rank_start = 1
@@ -418,6 +463,8 @@ def get_leaderboard():
     for ev in _STORE["evaluations"]:
         sub = next((s for s in _STORE["submissions"] if s["id"] == ev["submission_id"]), None)
         if not sub:
+            continue
+        if not sub.get("is_public", 1):
             continue
         if dataset_filter and sub["benchmark_dataset_name"] != dataset_filter:
             continue
@@ -590,7 +637,7 @@ def add_dataset_public():
     except Exception as e:
         if 'Duplicate' in str(e) or 'UNIQUE' in str(e):
             return jsonify({"success": False, "error": "Dataset with this name already exists"}), 400
-        print(f"add_dataset_public error: {e}")
+        logger.exception("add_dataset_public_error", extra={"error": str(e)})
         return jsonify({"success": False, "error": "Failed to add dataset"}), 500
     finally:
         try:
@@ -629,7 +676,8 @@ def dataset_details():
     if conn and cursor:
         try:
             cursor.execute(
-                "SELECT id, name, task_type, evaluation_metric, reference_data, created, active "
+                "SELECT id, name, task_type, evaluation_metric, reference_data, created, active, "
+                "COALESCE(questions_public, 1) AS questions_public "
                 "FROM benchmark_datasets WHERE name = %s OR LOWER(TRIM(name)) = LOWER(TRIM(%s))",
                 (name, name),
             )
@@ -668,6 +716,8 @@ def dataset_details():
                     "name": ds['name'],
                     "task_type": ds['task_type'],
                     "evaluation_metric": ds['evaluation_metric'],
+                    "questions_public": bool(ds.get('questions_public', 1)),
+                    "active": bool(ds.get('active', 1)),
                     **meta,
                     "size": count,
                     "examples": examples,
@@ -739,7 +789,149 @@ def dataset_details():
     return jsonify(_dataset_details_payload(core, mem[:10]))
 
 
+@bp.get('/public/model_names')
+def model_names():
+    """Return distinct public model names for autocomplete."""
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute(
+                "SELECT DISTINCT ms.model_name FROM model_submissions ms "
+                "JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                "WHERE bd.active = TRUE AND (ms.is_public IS NULL OR ms.is_public = 1) "
+                "ORDER BY ms.model_name ASC"
+            )
+            names = [row['model_name'] for row in cursor.fetchall()]
+        except Exception:
+            names = []
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+        return jsonify({'success': True, 'models': names})
+    names = sorted({s['model_name'] for s in _STORE.get('submissions', []) if s.get('model_name')})
+    return jsonify({'success': True, 'models': names})
+
+
+@bp.get('/public/compare_models')
+def compare_models():
+    """Compare scores of multiple models across shared datasets.
+
+    Query params:
+      models  — comma-separated model names (2–10 required)
+    """
+    raw = request.args.get('models', '')
+    model_names_req = [m.strip() for m in raw.split(',') if m.strip()]
+    if len(model_names_req) < 2:
+        return jsonify({"success": False, "error": "Provide at least 2 model names via ?models=A,B"}), 400
+    if len(model_names_req) > 10:
+        return jsonify({"success": False, "error": "Maximum 10 models"}), 400
+
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            placeholders = ', '.join(['%s'] * len(model_names_req))
+            cursor.execute(
+                f"SELECT ms.model_name, bd.name AS dataset_name, bd.task_type, bd.evaluation_metric, "
+                f"er.score, er.evaluation_details "
+                f"FROM model_submissions ms "
+                f"JOIN benchmark_datasets bd ON ms.benchmark_dataset_id = bd.id "
+                f"JOIN evaluation_results er ON er.model_submission_id = ms.id "
+                f"WHERE ms.model_name IN ({placeholders}) "
+                f"  AND bd.active = TRUE "
+                f"  AND (ms.is_public IS NULL OR ms.is_public = 1) "
+                f"ORDER BY bd.name ASC, er.score DESC",
+                tuple(model_names_req),
+            )
+            rows = cursor.fetchall()
+        except Exception as e:
+            logger.exception("compare_models_db_error", extra={"error": str(e)})
+            rows = []
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+        dataset_models: dict = {}
+        dataset_meta: dict = {}
+        for row in rows:
+            ds = row['dataset_name']
+            mn = row['model_name']
+            score = float(row['score'])
+            if ds not in dataset_models:
+                dataset_models[ds] = {}
+            if mn not in dataset_models[ds] or score > dataset_models[ds][mn]['score']:
+                details: dict = {}
+                if row.get('evaluation_details'):
+                    try:
+                        details = json.loads(row['evaluation_details']) if isinstance(row['evaluation_details'], str) else row['evaluation_details']
+                    except Exception:
+                        details = {}
+                dataset_models[ds][mn] = {
+                    'score': score,
+                    'detailed_scores': details.get('detailed_scores') if isinstance(details, dict) else None,
+                }
+                dataset_meta[ds] = {
+                    'task_type': row.get('task_type'),
+                    'evaluation_metric': row.get('evaluation_metric'),
+                }
+
+        comparisons = []
+        for ds_name in sorted(dataset_models):
+            model_scores = dataset_models[ds_name]
+            present = [m for m in model_names_req if m in model_scores]
+            if len(present) < 2:
+                continue
+            meta = dataset_meta.get(ds_name, {})
+            comparisons.append({
+                'dataset_name': ds_name,
+                'task_type': meta.get('task_type'),
+                'evaluation_metric': meta.get('evaluation_metric'),
+                'scores': {m: model_scores[m] for m in model_names_req if m in model_scores},
+            })
+        return jsonify({'success': True, 'models': model_names_req, 'comparisons': comparisons})
+
+    # In-memory fallback
+    dataset_models = {}
+    for sub in _STORE.get('submissions', []):
+        mn = sub.get('model_name', '')
+        if mn not in model_names_req:
+            continue
+        ds = sub.get('benchmark_dataset_name', '')
+        for ev in _STORE.get('evaluations', []):
+            if ev.get('submission_id') == sub.get('id'):
+                score = float(ev.get('score', 0))
+                if ds not in dataset_models:
+                    dataset_models[ds] = {}
+                if mn not in dataset_models[ds] or score > dataset_models[ds][mn]['score']:
+                    details = ev.get('evaluation_details') or {}
+                    dataset_models[ds][mn] = {
+                        'score': score,
+                        'detailed_scores': details.get('detailed_scores') if isinstance(details, dict) else None,
+                    }
+                break
+
+    comparisons = []
+    for ds_name in sorted(dataset_models):
+        model_scores = dataset_models[ds_name]
+        present = [m for m in model_names_req if m in model_scores]
+        if len(present) < 2:
+            continue
+        comparisons.append({
+            'dataset_name': ds_name,
+            'task_type': None,
+            'evaluation_metric': None,
+            'scores': {m: model_scores[m] for m in model_names_req if m in model_scores},
+        })
+    return jsonify({'success': True, 'models': model_names_req, 'comparisons': comparisons})
+
+
 @bp.get('/public/export/leaderboard')
+@rate_limit("EXPORT_RATE_LIMIT", "10/minute")
 def export_leaderboard():
     """Export leaderboard rows as CSV or JSON (follows keyset cursors until exhausted)."""
     dataset_name = request.args.get("dataset")
@@ -827,8 +1019,9 @@ def add_dataset():
         "description": data.get("description"),
         "models": data.get("models", []),
     }
-    LEADERBOARD_DATA[:] = [ds for ds in LEADERBOARD_DATA if ds.get("name") != name]
-    LEADERBOARD_DATA.append(new_ds)
+    with _LD_LOCK:
+        LEADERBOARD_DATA[:] = [ds for ds in LEADERBOARD_DATA if ds.get("name") != name]
+        LEADERBOARD_DATA.append(new_ds)
     reference_data = {}
     if data.get("url"):
         reference_data["url"] = data.get("url")
@@ -908,7 +1101,8 @@ def add_model():
                         "evaluation_metric": row.get("evaluation_metric"),
                         "models": [],
                     }
-                    LEADERBOARD_DATA.append(target_dataset)
+                    with _LD_LOCK:
+                        LEADERBOARD_DATA.append(target_dataset)
             finally:
                 try:
                     cursor_lookup.close()
@@ -1060,15 +1254,58 @@ def list_leaderboard_datasets():
         "datasets": LEADERBOARD_DATA,
     })
 
+@bp.get('/api/admin/quota_usage')
+@require_admin
+def quota_usage():
+    """Admin: return daily submission quota usage and active rate-limit windows.
+
+    Response:
+    {
+      "success": true,
+      "quota": [{"submitter_id": str, "date": str, "used": int, "limit": int, "remaining": int}],
+      "rate_windows": [{"ip": str, "path": str, "requests_last_minute": int}],
+      "daily_limit": int
+    }
+    """
+    limit = daily_submission_limit()
+    counts = _STORE.get("submission_counts") or {}
+    quota_rows = []
+    for key, used in sorted(counts.items(), key=lambda x: -x[1]):
+        parts = key.rsplit(":", 1)
+        submitter_id = parts[0] if len(parts) == 2 else key
+        date = parts[1] if len(parts) == 2 else ""
+        quota_rows.append({
+            "submitter_id": submitter_id,
+            "date": date,
+            "used": int(used),
+            "limit": limit,
+            "remaining": max(0, limit - int(used)),
+        })
+
+    now = time()
+    rate_rows = []
+    for (ip, path), window in list(_RATE_WINDOWS.items()):
+        recent = sum(1 for t in window if now - t <= 60)
+        if recent > 0:
+            rate_rows.append({"ip": ip, "path": path, "requests_last_minute": recent})
+    rate_rows.sort(key=lambda r: -r["requests_last_minute"])
+
+    return jsonify({
+        "success": True,
+        "quota": quota_rows,
+        "rate_windows": rate_rows,
+        "daily_limit": limit,
+    })
+
+
 @bp.patch('/api/admin/datasets/<string:dataset_name>/questions_public')
+@require_admin
 def set_questions_public(dataset_name: str):
     """Admin: toggle whether questions are shown publicly for a dataset.
 
     Body: {"questions_public": true|false}
+    Header: X-Admin-Key — must match one of LEADERBOARD_ADMIN_API_KEYS
     """
-    jwt_sub = jwt_sub_from_request(request)
-    if not jwt_sub:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
     body = request.get_json(silent=True) or {}
     raw = body.get("questions_public")
     if raw is None:
@@ -1105,6 +1342,54 @@ def set_questions_public(dataset_name: str):
         return jsonify({"success": False, "error": "Dataset not found"}), 404
     ds["questions_public"] = val
     return jsonify({"success": True, "dataset": dataset_name, "questions_public": bool(val)})
+
+
+@bp.post('/api/admin/datasets/<string:dataset_name>/deactivate')
+@require_admin
+def deactivate_dataset(dataset_name: str):
+    """Admin: set a dataset inactive so it no longer appears in the public API."""
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute("UPDATE benchmark_datasets SET active = 0 WHERE name = %s", (dataset_name,))
+            if cursor.rowcount == 0:
+                return jsonify({"success": False, "error": "Dataset not found"}), 404
+            conn.commit()
+            return jsonify({"success": True, "dataset": dataset_name, "active": False})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            try: cursor.close(); conn.close()
+            except Exception: pass
+    ds = next((d for d in _STORE["datasets"] if d.get("name") == dataset_name), None)
+    if not ds:
+        return jsonify({"success": False, "error": "Dataset not found"}), 404
+    ds["active"] = False
+    return jsonify({"success": True, "dataset": dataset_name, "active": False})
+
+
+@bp.post('/api/admin/datasets/<string:dataset_name>/activate')
+@require_admin
+def activate_dataset(dataset_name: str):
+    """Admin: re-enable a previously deactivated dataset."""
+    conn, cursor = get_db_connection()
+    if conn and cursor:
+        try:
+            cursor.execute("UPDATE benchmark_datasets SET active = 1 WHERE name = %s", (dataset_name,))
+            if cursor.rowcount == 0:
+                return jsonify({"success": False, "error": "Dataset not found"}), 404
+            conn.commit()
+            return jsonify({"success": True, "dataset": dataset_name, "active": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            try: cursor.close(); conn.close()
+            except Exception: pass
+    ds = next((d for d in _STORE["datasets"] if d.get("name") == dataset_name), None)
+    if not ds:
+        return jsonify({"success": False, "error": "Dataset not found"}), 404
+    ds["active"] = True
+    return jsonify({"success": True, "dataset": dataset_name, "active": True})
 
 
 _AUTO_SEED_DONE = False

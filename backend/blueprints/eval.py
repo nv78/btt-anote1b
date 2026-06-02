@@ -5,6 +5,78 @@ from shared import *
 bp = Blueprint("eval", __name__)
 app = bp
 
+
+def _public_question_options(row: dict[str, Any]) -> list[dict[str, str]]:
+    raw = row.get("options") or row.get("choices") or row.get("answer_choices")
+    if raw is None:
+        options = []
+        for letter in ("A", "B", "C", "D", "E", "F"):
+            value = row.get(letter) or row.get(letter.lower())
+            if value is not None:
+                options.append({"label": letter, "text": str(value)})
+        return options
+    if isinstance(raw, dict):
+        return [
+            {"label": str(label), "text": str(text)}
+            for label, text in raw.items()
+            if text is not None
+        ]
+    if isinstance(raw, list):
+        options = []
+        for idx, value in enumerate(raw):
+            fallback = chr(ord("A") + idx)
+            if isinstance(value, dict):
+                label = value.get("label") or value.get("letter") or value.get("key") or fallback
+                text = value.get("text") or value.get("value") or value.get("option") or ""
+                if text:
+                    options.append({"label": str(label), "text": str(text)})
+            elif value is not None:
+                options.append({"label": fallback, "text": str(value)})
+        return options
+    return []
+
+
+def _question_items_from_reference_data(ref: object) -> list[dict[str, Any]]:
+    if not isinstance(ref, dict):
+        return []
+    ground_truth = ref.get("ground_truth")
+    if isinstance(ground_truth, list) and ground_truth and all(isinstance(row, dict) for row in ground_truth):
+        items = []
+        for idx, row in enumerate(ground_truth):
+            text = (
+                row.get("input")
+                or row.get("question")
+                or row.get("sentence")
+                or row.get("text")
+                or row.get("source")
+                or row.get("prompt")
+                or ""
+            )
+            context = row.get("context") or row.get("passage") or row.get("document")
+            item = {
+                "id": int(row.get("id", idx)) if str(row.get("id", idx)).isdigit() else idx,
+                "input": str(text),
+                "context": str(context) if context is not None else None,
+            }
+            options = _public_question_options(row)
+            if options:
+                item["options"] = options
+            items.append(item)
+        return items
+    source_texts = ref.get("source_texts")
+    if isinstance(source_texts, list):
+        contexts = ref.get("contexts") if isinstance(ref.get("contexts"), list) else []
+        return [
+            {
+                "id": idx,
+                "input": str(text),
+                "context": str(contexts[idx]) if idx < len(contexts) and contexts[idx] is not None else None,
+            }
+            for idx, text in enumerate(source_texts)
+        ]
+    return []
+
+
 @bp.get('/public/get_source_sentences')
 def get_source_sentences():
     """Return source sentences users should translate.
@@ -23,6 +95,7 @@ def get_source_sentences():
 
     # Try to pull from DB reference_data if available
     pool = None
+    question_items = None
     conn, cursor = get_db_connection()
     if conn and cursor:
         try:
@@ -55,7 +128,10 @@ def get_source_sentences():
                 if row.get('reference_data'):
                     try:
                         ref = json.loads(row['reference_data']) if isinstance(row['reference_data'], str) else row['reference_data']
-                        if isinstance(ref, dict) and isinstance(ref.get('source_texts'), list):
+                        question_items = _question_items_from_reference_data(ref)
+                        if question_items:
+                            pool = [item.get("input", "") for item in question_items]
+                        elif isinstance(ref, dict) and isinstance(ref.get('source_texts'), list):
                             pool = ref['source_texts']
                     except Exception:
                         pool = None
@@ -65,6 +141,27 @@ def get_source_sentences():
                 conn.close()
             except Exception:
                 pass
+
+    if not pool:
+        stored = next((d for d in _STORE["datasets"] if d.get("name") == dataset_name), None)
+        if stored:
+            ref = stored.get("reference_data") or {}
+            if isinstance(ref, str):
+                try:
+                    ref = json.loads(ref)
+                except Exception:
+                    ref = {}
+            if not bool(stored.get("questions_public", 1)):
+                n = len(ref.get("source_texts") or ref.get("ground_truth") or []) if isinstance(ref, dict) else 0
+                return jsonify({
+                    "success": False,
+                    "questions_public": False,
+                    "question_count": n,
+                    "error": "Questions for this dataset are hidden. Use IDs 0–{} when submitting.".format(n - 1),
+                }), 403
+            question_items = _question_items_from_reference_data(ref)
+            if question_items:
+                pool = [item.get("input", "") for item in question_items]
 
     # If DB not available or no source_texts provided, fallback pools by dataset
     if not pool:
@@ -78,12 +175,21 @@ def get_source_sentences():
     end_idx = min(start_idx + count, len(pool))
     selected = pool[start_idx:end_idx]
     sentence_ids = list(range(start_idx, end_idx))
+    if question_items:
+        selected_questions = question_items[start_idx:end_idx]
+        sentence_ids = [item.get("id", idx + start_idx) for idx, item in enumerate(selected_questions)]
+    else:
+        selected_questions = [
+            {"id": sentence_ids[idx], "input": text, "context": None}
+            for idx, text in enumerate(selected)
+        ]
 
     return jsonify({
         "success": True,
         "dataset_name": dataset_name,
         "sentence_ids": sentence_ids,
         "source_sentences": selected,
+        "questions": selected_questions,
         "count": len(selected),
     })
 
@@ -98,11 +204,12 @@ def import_hf_dataset_public():
             from hf_importer import import_hf_dataset  # type: ignore
         except Exception:
             from backend.hf_importer import import_hf_dataset  # type: ignore
+        limit = parse_bounded_int(data.get("limit"), "limit", 100, min_value=1, max_value=5000)
         payload = import_hf_dataset(
             dataset_name=data.get("dataset_name") or data.get("name"),
             config=data.get("config"),
             split=data.get("split", "test"),
-            limit=int(data.get("limit", 100)),
+            limit=limit,
             task_type=data.get("task_type"),
             display_name=data.get("display_name"),
             leaderboard_dataset_id=data.get("leaderboard_dataset_id") or data.get("dataset_id"),
@@ -360,7 +467,7 @@ def _persist_evaluated_submission(dataset_name: str, model_name: str, submitted_
 def _run_hf_model_job(data: dict[str, Any]) -> dict[str, Any]:
     dataset_name = validate_text(data.get("dataset_name"), "dataset_name")
     model_id = validate_text(data.get("model_id"), "model_id", 255)
-    batch_size = max(1, min(128, int(data.get("batch_size", 16))))
+    batch_size = parse_bounded_int(data.get("batch_size"), "batch_size", 16, min_value=1, max_value=128)
     dataset = _dataset_by_name(dataset_name)
     if not dataset:
         raise ValueError("Dataset not found")
@@ -488,7 +595,7 @@ def list_benchmark_models():
         models = _mdl.list_models()
         return jsonify({"success": True, "models": models})
     except Exception as e:
-        print(f"list_benchmark_models error: {e}")
+        logger.exception("list_benchmark_models_failed", extra={"error": str(e)})
         return jsonify({"success": False, "error": "Model list unavailable"}), 500
 
 @bp.post('/public/run_csv_benchmarks')
@@ -513,7 +620,10 @@ def run_csv_benchmarks():
     data = request.get_json(silent=True) or {}
     models = data.get('models') or []
     datasets = data.get('datasets')
-    sample_size = int(data.get('sample_size', 25))
+    try:
+        sample_size = parse_bounded_int(data.get("sample_size"), "sample_size", 25, min_value=1, max_value=5000)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     if not isinstance(models, list) or not models:
         # If no models provided, try backend/models.py list_models()
         try:
@@ -525,5 +635,5 @@ def run_csv_benchmarks():
         summary = csv_bench.run_benchmarks(models=models, datasets=datasets, sample_size=sample_size)
         return jsonify({"success": True, **summary})
     except Exception as e:
-        print(f"CSV benchmarks error: {e}")
+        logger.exception("csv_benchmarks_failed", extra={"error": str(e)})
         return jsonify({"success": False, "error": "Failed to run benchmarks"}), 500
