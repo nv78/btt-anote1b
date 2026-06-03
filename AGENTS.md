@@ -1,381 +1,414 @@
 # AGENTS.md — Anote Model Leaderboard
 
-This file is the **primary onboarding document for AI coding agents** (Codex, Claude, Cursor, etc.).
-Read this before touching any file. See CLAUDE.md for legacy notes.
+This is the primary onboarding document for AI coding agents and new contributors working in this repository. Read this before touching code. `CLAUDE.md` is retained for legacy context, but this file is the source of truth.
 
----
+## Project Summary
 
-## What we are building
+The **Anote Model Leaderboard** is a benchmarking platform for evaluating AI models on fixed datasets. Users can browse datasets, submit model predictions through the UI or backend API, get automatic scores, and compare ranked results with detailed metric breakdowns.
 
-**Anote Model Leaderboard** is a benchmarking platform where anyone can:
-1. Browse ranked AI model performance across curated datasets.
-2. Submit their own model's predictions to get evaluated and ranked automatically.
-3. See **transparent, reproducible scores** with full metric breakdowns — not just a single number.
+Repository: <https://github.com/anote-ai/Leaderboard>  
+Current main branch: `main`  
+Frontend target: `https://leaderboard.anote.ai`  
+Backend target in the current deploy workflow: `https://api-leaderboard.anote.ai`
 
-It lives at: `https://leaderboard.anote.ai` (frontend) + `https://api.anote.ai` (backend).
+If the final production backend domain changes, update the deploy workflow, frontend environment variables, CORS settings, and OAuth redirect configuration together.
 
-The active development branch is **`jeremy`** on `https://github.com/anote-ai/Leaderboard.git`.
+## Core Product Shape
 
----
+This is a backend-backed product, not a static frontend.
 
-## Repository layout
+- The frontend renders the leaderboard, dataset details, submission flow, My Submissions, OAuth callback, CSV benchmark demo, and admin views.
+- The backend owns auth, dataset reads, submission validation, evaluation, async job polling, quotas, admin moderation, exports, provider-backed LLM runs, and persistence.
+- Local development can use SQLite with no MySQL.
+- Production should use a durable DB such as RDS/MySQL instead of instance-local SQLite.
 
-```
+## Repository Layout
+
+```text
 Leaderboard/
-├── backend/                    # Flask (Python) REST API
-│   ├── app.py                  # Flask app factory, CORS, core routes/OpenAPI, blueprint registration (~248 lines)
-│   ├── shared.py               # Shared state/helpers imported by blueprints (~428 lines)
+├── backend/                         Flask API
+│   ├── app.py                       App setup, CORS, JSON errors, blueprint registration
+│   ├── shared.py                    DB helpers, auth decorators, quotas, shared state
+│   ├── auth_helpers.py              JWT/JWKS decode helpers
+│   ├── composite_score.py           0-100 aggregate score from detailed_scores
+│   ├── csv_bench.py                 CSV benchmark task inference/scoring
+│   ├── hf_importer.py               Hugging Face dataset import logic
+│   ├── metrics_info_full.py         Metric catalog and per-task metric lists
+│   ├── models.py                    Provider wrappers for OpenAI/Anthropic/Gemini/Ollama/etc.
+│   ├── pagination.py                Keyset cursor encode/decode
+│   ├── ui_fallback_dataset_catalog.py
 │   ├── blueprints/
-│   │   ├── __init__.py
-│   │   ├── leaderboard.py      # Dataset, leaderboard, export, curated seed/list routes (~1060 lines)
-│   │   ├── submissions.py      # Submit, my submissions, submission detail, eval jobs routes (~622 lines)
-│   │   ├── eval.py             # HF import/model runner, CSV benchmark routes (~508 lines)
-│   │   ├── auth.py             # Google OAuth start/callback routes (~62 lines)
-│   │   ├── admin.py            # Admin submissions moderation route (~219 lines)
-│   │   └── metrics.py          # Metrics catalog routes (~23 lines)
-│   ├── auth_helpers.py         # JWT decode helpers (HS256 + optional JWKS)
-│   ├── composite_score.py      # Aggregate 0-100 score from detailed_scores
-│   ├── csv_bench.py            # CSV benchmark: task inference, scoring
-│   ├── hf_importer.py          # Hugging Face dataset import logic
-│   ├── metrics_info.py         # Legacy metrics stub (for backward compat)
-│   ├── metrics_info_full.py    # Full METRICS_CATALOG + per-task metric lists ← edit this for metric changes
-│   ├── models.py               # LLM provider wrappers (OpenAI, Anthropic, Gemini, Ollama, echo)
-│   ├── pagination.py           # Keyset cursor encode/decode
-│   ├── ui_fallback_dataset_catalog.py  # Static metadata for demo leaderboard cards
+│   │   ├── leaderboard.py           Datasets, details, questions, format, leaderboard, export
+│   │   ├── submissions.py           Submit, async jobs, LLM runs, My Submissions, detail/delete
+│   │   ├── eval.py                  HF import/model runner, CSV benchmark routes
+│   │   ├── auth.py                  Google OAuth start/callback
+│   │   ├── admin.py                 Admin moderation
+│   │   ├── metrics.py               Metric catalog routes
+│   │   └── dataset_requests.py      Dataset request workflow
 │   ├── eval_core/
-│   │   ├── evaluators.py       # TextClassification, NER, QA, Retrieval, Translation evaluators
-│   │   ├── hf_dataset_recipes.py  # HF dataset → ground_truth conversion
-│   │   └── leaderboard_bridge.py  # Bridges evaluators to submission format
-│   ├── ingestion/              # Pluggable dataset ingestion (HF, HTTP)
-│   ├── sdk/leaderboard_sdk.py  # Python client SDK (LeaderboardClient)
-│   ├── database/               # SQL schemas + dev init script
-│   ├── examples/               # Seed scripts + example JSON payloads
-│   ├── scripts/                # Bulk import, OpenAPI export, model submission examples
-│   ├── tests/                  # pytest suite (tests/ folder — run these for CI)
-│   │   ├── conftest.py
-│   │   ├── test_bearer_write_auth.py
-│   │   ├── test_composite_score.py
-│   │   ├── test_eval_core.py
-│   │   ├── test_metrics_task_lists.py
-│   │   ├── test_pagination_and_admin.py
-│   │   └── test_submission_contract.py
-│   ├── pytest/                 # Older integration tests (also runnable, but secondary)
-│   ├── .env                    # Local secrets — GITIGNORED, never commit
-│   ├── .env.example            # Template — keep this updated
+│   │   ├── evaluators.py            Task scoring implementations
+│   │   ├── hf_dataset_recipes.py    HF dataset to ground-truth conversion
+│   │   └── leaderboard_bridge.py    Submission format and evaluator bridge
+│   ├── database/schema_leaderboard.sql
+│   ├── sdk/leaderboard_sdk.py
+│   ├── examples/
+│   ├── scripts/
+│   ├── tests/                       Primary pytest suite
+│   ├── .env.example                 Keep env docs current
 │   └── requirements.txt
-│
-├── frontend/                   # Create React App (CRA) + Tailwind
-│   ├── src/
-│   │   ├── App.js              # Router + Google Analytics setup
-│   │   ├── landing_page/
-│   │   │   ├── LandingPage.js  # Route definitions — register new pages here
-│   │   │   └── landing_page_components/
-│   │   │       ├── Leaderboard.js          # Main leaderboard grid (hardcoded demo + live API)
-│   │   │       ├── DatasetDetails.js       # /dataset/:name page
-│   │   │       ├── TaskAdvancedMetricsPanel.js  # Reusable metrics glossary table
-│   │   │       ├── SubmitToLeaderboard.js  # Submission form
-│   │   │       ├── MySubmissions.js        # User's past submissions
-│   │   │       ├── AdminLeaderboardManager.js  # Admin: curated datasets
-│   │   │       ├── AdminSubmissionsModeration.js  # Admin: review submissions
-│   │   │       ├── LoginPage.js            # Google OAuth start
-│   │   │       ├── OAuthCallback.js        # Handles #access_token fragment post-OAuth
-│   │   │       ├── AuthGuard.js            # Redirects unauthenticated users
-│   │   │       ├── CsvBenchmarksDemo.js    # Run CSV benchmarks against live LLMs
-│   │   │       └── ...
-│   │   ├── utils/
-│   │   │   ├── formatMetricsSummary.js     # Format detailed_scores into compact string
-│   │   │   └── leaderboardAuth.js          # Token retrieval helpers
-│   │   └── constants/RouteConstants.js     # All SPA route paths
-│   ├── public/benchmark_csvs/  # 60+ CSV benchmark files served statically
-│   ├── .env.development        # REACT_APP_API_ENDPOINT=http://localhost:5000
-│   └── .env.production         # REACT_APP_API_ENDPOINT=https://api.anote.ai
-│
-├── docs/                       # MkDocs documentation source
-├── docker-compose.yml
-├── AGENTS.md                   # ← this file
-├── CLAUDE.md                   # Legacy agent notes (lower priority than AGENTS.md)
-└── README.md
+├── frontend/                        React 18 Create React App
+│   ├── src/App.js
+│   ├── src/stores/store.js
+│   ├── src/landing_page/LandingPage.js
+│   ├── src/landing_page/landing_page_components/
+│   │   ├── Leaderboard.js
+│   │   ├── DatasetDetails.js
+│   │   ├── SubmitToLeaderboard.js
+│   │   ├── MySubmissions.js
+│   │   ├── AdminLeaderboardManager.js
+│   │   ├── AdminSubmissionsModeration.js
+│   │   ├── LoginPage.js
+│   │   ├── OAuthCallback.js
+│   │   ├── AuthGuard.js
+│   │   └── CsvBenchmarksDemo.js
+│   ├── src/landing_page/landing_page_components/submissionFormatUtils.js
+│   ├── src/utils/leaderboardAuth.js
+│   ├── src/constants/RouteConstants.js
+│   └── public/benchmark_csvs/
+├── docs/                            MkDocs docs
+├── aws_deploy/                      Elastic Beanstalk deployment files
+├── .github/workflows/ci.yml
+├── .github/workflows/deploy.yml
+├── HANDOFF_MESSAGE.md               Sendable project handoff
+├── KNOWLEDGE_TRANSFER.md            Deployment-focused handoff notes
+├── AUDIT_FIX_NOTES.md               Audit/fix working history
+├── README.md
+└── AGENTS.md
 ```
 
----
+## Tech Stack
 
-## Tech stack
+| Area | Stack |
+|------|-------|
+| Backend | Python, Flask, Authlib, PyJWT, python-dotenv |
+| Database | SQLite by default, optional MySQL/RDS, in-memory fallback only for development/failure cases |
+| Auth | Google OAuth, HS256 JWT, optional JWKS bearer JWT, API keys, admin keys |
+| Frontend | React 18, Create React App, Tailwind, MUI |
+| State | Redux Toolkit + Redux Persist, Zustand |
+| CI | GitHub Actions: backend tests, Ruff fatal checks, MkDocs, frontend lint/build, Docker builds |
+| Deploy | Backend Docker to ECR/Elastic Beanstalk; frontend static build to S3/CloudFront |
 
-| Layer | Choice |
-|-------|--------|
-| Backend | Python 3.11, Flask 2.3, Authlib, PyJWT, python-dotenv |
-| Database | SQLite by default (`SQLITE_DB_PATH`), optional MySQL, in-memory `_STORE` fallback only if disk DB unavailable |
-| Frontend | React 18, Create React App, Tailwind CSS |
-| State | Redux Toolkit + Redux Persist (cross-component), Zustand (local) |
-| Auth | Google OAuth 2.0 → HS256 JWT minted by Flask; or Bearer JWT via JWKS |
-| Tests | pytest (`backend/tests/` is the primary suite; 33 tests, all must pass) |
-| CI | `.github/workflows/ci.yml` — pytest + Ruff + frontend build |
+## Current Verification Status
 
----
+As of the latest handoff:
 
-## How to run locally
+- `main` is pushed to `origin/main`.
+- GitHub Actions `CI` is passing.
+- GitHub Actions `Deploy` is passing.
+- Backend tests: `100 passed`.
+- Frontend build: passing.
+- Frontend lint: passing with existing non-blocking warnings.
+- Frontend helper tests exist for submission-format utilities.
+
+CI currently enforces backend tests and frontend lint/build. It does not yet run a full browser E2E suite.
+
+## Local Development
+
+Backend:
 
 ```bash
-# 1. Backend
 cd Leaderboard/backend
 pip install -r requirements.txt
-cp .env.example .env          # then fill in GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, LEADERBOARD_JWT_SECRET
-python app.py                 # runs on :5001 by default
+cp .env.example .env
+PORT=5001 FLASK_ENV=development python app.py
+```
 
-# 2. Frontend
+Frontend:
+
+```bash
 cd Leaderboard/frontend
 npm install
-REACT_APP_API_ENDPOINT=http://localhost:5001 npm start   # runs on :3000
-
-# 3. Tests (must all pass before commit)
-cd Leaderboard/backend
-PYTHONPATH=. pytest -q tests/
+PORT=3001 REACT_APP_API_BASE=http://127.0.0.1:5001 npm start
 ```
 
----
+Common local URLs:
 
-## All API routes (current)
-
-```
-GET  /                                  Info / welcome
-GET  /health                            Health check
-GET  /openapi.json                      OpenAPI spec
-GET  /public/datasets                   List benchmark datasets
-GET  /public/dataset_details            Dataset detail + metric docs (name= query param)
-GET  /public/get_source_sentences       Translation sentences for evaluation
-GET  /public/dataset_questions          Dataset inputs/questions without labels (dataset= query param)
-POST /public/submit_model               Submit model predictions → evaluates → ranks
-GET  /public/get_leaderboard            Ranked results (keyset pagination + dataset filter)
-GET  /public/my_submissions             Caller's past submissions (JWT or submitter_id)
-GET  /public/submission_quota           Daily quota usage for submitter_id or caller IP
-GET  /public/submissions/<id>           Single submission detail
-GET  /public/export/leaderboard         CSV or JSON dump of leaderboard
-GET  /public/submission_format          Template for a dataset's submission format
-POST /public/import_hf_dataset          Import a Hugging Face dataset split
-POST /public/run_hf_model               Run a Hugging Face model on an imported dataset
-POST /api/datasets/ingest               HF ingestion alias
-GET  /public/benchmark_csvs             List available CSV benchmark files
-GET  /public/benchmark_models           List available model providers
-POST /public/run_csv_benchmarks         Run LLMs over CSV benchmarks inline
-GET  /public/eval_jobs/<job_id>         Async eval job status
-GET  /public/auth/google/start          Redirect to Google OAuth
-GET  /public/auth/google/callback       OAuth callback → JWT → redirect to SPA
-GET  /api/admin/submissions             Admin: list all submissions (X-Admin-Key)
-GET  /api/metrics                       Full metric catalog
-GET  /api/metrics/task/<task_type>      Per-task metric glossary + formulas
-POST /api/leaderboard/add_dataset       Add curated dataset (API key required)
-POST /api/leaderboard/add_model         Add model result to curated dataset
-POST /api/leaderboard/seed              Admin: seed the 10 built-in benchmark datasets
-GET  /api/leaderboard/list              List curated datasets
+```text
+Backend:  http://127.0.0.1:5001
+Frontend: http://127.0.0.1:3001
+Health:   http://127.0.0.1:5001/health
 ```
 
----
+## Verification Commands
 
-## Key modules explained
+Use these before handing off code changes:
 
-### `composite_score.py`
-Computes a **0–100 aggregate score** across all reported metrics in `detailed_scores`.
-- Normalizes each component to [0,1] (inverts lower-is-better metrics like `median_distance_error`, `ter`).
-- Applies soft weights that slightly boost canonical metrics (accuracy, f1, bleu, exact_match).
-- Called in `get_leaderboard` for every row — output fields are `composite_score` and `composite_breakdown`.
+```bash
+cd Leaderboard
+uv run pytest -q backend/tests
+uv run --with mkdocs-material mkdocs build --strict
+ruff check backend --select E9,F63,F7,F82
+```
 
-### `metrics_info_full.py`
-Single source of truth for every evaluation metric.
-- `METRICS_CATALOG` — dict of metric key → `{name, formula, description, range, when_to_use, limitations, interpretation}`.
-- `get_metrics_for_task(task_type)` — returns ordered list of metric keys for each task. **Edit this when adding/removing metrics per task.**
-- `normalize_task_type_for_metrics(task_type)` — alias mapping so `"ner"`, `"qa"`, `"rag"`, `"sum"`, etc. resolve to canonical keys.
-- `metrics_for_task(task_type)` — used by `GET /api/metrics/task/<task_type>`.
+```bash
+cd Leaderboard/frontend
+npm run lint
+npm run build
+npm test -- --watchAll=false --runTestsByPath src/landing_page/landing_page_components/submissionFormatUtils.test.js
+```
 
-### `eval_core/evaluators.py`
-One evaluator class per task type:
-- `TextClassificationEvaluator` — accuracy, macro/micro F1, precision, recall, balanced accuracy, Cohen's κ, MCC.
-- `NEREvaluator` — strict + partial span F1/precision/recall.
-- `QAEvaluator` — exact match, token F1, BLEU, ROUGE-1/L, METEOR, length ratio.
-- `RetrievalEvaluator` — retrieval accuracy, MRR, MAP, nDCG, P@K, R@K.
-- `TranslationEvaluator` — BLEU, BERTScore (optional), chrF/TER placeholder.
+For docs-only changes, it is acceptable to skip the full application test suite if the change is clearly documentation-only. Mention that in the final response.
 
-Each `evaluate(ground_truth, predictions)` returns a flat dict of `{metric_key: float}` — this becomes `evaluation_details.detailed_scores` in the DB.
+## Important API Routes
 
-### `ui_fallback_dataset_catalog.py`
-Provides static metadata for the 10 demo cards hardcoded in the frontend `Leaderboard.js` fallback array.
-When the live API returns no rows, Details navigation still works because `dataset_details` falls back to this catalog.
-**If you add a new hardcoded demo dataset to `Leaderboard.js`, add a matching entry here.**
+```text
+GET  /health
+GET  /openapi.json
+GET  /public/datasets
+GET  /public/dataset_details
+GET  /public/dataset_questions
+GET  /public/submission_format
+POST /public/submit_model
+GET  /public/eval_jobs/<job_id>
+POST /public/run_llm_submission
+GET  /public/get_leaderboard
+GET  /public/export/leaderboard
+GET  /public/my_submissions
+GET  /public/submission_quota
+GET  /public/submissions/<id>
+DELETE /public/submissions/<id>
+POST /public/import_hf_dataset
+POST /public/run_hf_model
+GET  /public/benchmark_csvs
+GET  /public/benchmark_models
+POST /public/run_csv_benchmarks
+GET  /public/auth/google/start
+GET  /public/auth/google/callback
+GET  /api/admin/submissions
+POST /api/admin/submissions/<id>/activate
+POST /api/admin/submissions/<id>/deactivate
+POST /api/admin/datasets/<dataset>/questions_public
+GET  /api/metrics
+GET  /api/metrics/task/<task_type>
+POST /api/leaderboard/add_dataset
+POST /api/leaderboard/add_model
+POST /api/leaderboard/seed
+GET  /api/leaderboard/list
+```
 
-### Backend blueprints
-`backend/app.py` creates the Flask app, configures CORS/OAuth, registers all blueprints, and re-exports shared globals for older tests/scripts. Route ownership is split across:
-- `blueprints/leaderboard.py` — datasets, dataset details/questions, submission format, leaderboard, export, curated add/list/seed.
-- `blueprints/submissions.py` — submit model, my submissions, submission detail, eval jobs.
-- `blueprints/eval.py` — HF import/model runner, CSV benchmark listing/runs, source sentences, ingestion alias.
-- `blueprints/auth.py` — Google OAuth start/callback.
-- `blueprints/admin.py` — admin submission listing.
-- `blueprints/metrics.py` — metric catalog and per-task metric glossary.
+Route ownership:
 
-### `TaskAdvancedMetricsPanel.js`
-Reusable React component:
-- Calls `GET /api/metrics/task/<taskType>`.
-- Renders grouped, collapsible metric categories with formula, range, and one score column per model.
-- Used in `Leaderboard.js` (advanced toggle per card) and `DatasetDetails.js` (full glossary).
-- Values are resolved via `lookupDetailedScore(detailedScores, catalogKey)` — tolerates case/`_` differences.
+- `backend/blueprints/leaderboard.py`: datasets, dataset details/questions, submission format, leaderboard reads/export, curated add/list/seed.
+- `backend/blueprints/submissions.py`: submit model, async jobs, hosted LLM submission, My Submissions, detail/delete/visibility, quota.
+- `backend/blueprints/eval.py`: HF import/model runner, CSV benchmark listing/runs, source sentence helpers, ingestion alias.
+- `backend/blueprints/auth.py`: Google OAuth.
+- `backend/blueprints/admin.py`: moderation/admin listing.
+- `backend/blueprints/metrics.py`: metric catalog.
+- `backend/blueprints/dataset_requests.py`: dataset request flow.
 
----
+## Authentication Model
 
-## Authentication model
+| Caller | Mechanism |
+|--------|-----------|
+| Public reads | No auth required |
+| User writes/submissions | `X-API-Key` or `Authorization: Bearer <jwt>` with non-empty `sub` |
+| Admin routes | `X-Admin-Key` or `X-API-Key` matching `LEADERBOARD_ADMIN_API_KEYS` |
+| Google login | `/public/auth/google/start` -> Google -> callback -> Flask-minted JWT -> SPA stores `lb_jwt` |
+| Main-app auth integration | Optional JWKS via `ANOTE_JWKS_URL`, with optional issuer/audience checks |
 
-| Who | How |
-|-----|-----|
-| **Read** (leaderboard, datasets, metrics) | No auth required |
-| **Write** (submit model, add dataset) | `X-API-Key` header OR `Authorization: Bearer <jwt>` with non-empty `sub` claim |
-| **Admin** (list/moderate submissions) | `X-Admin-Key` or `X-API-Key` matching `LEADERBOARD_ADMIN_API_KEYS` |
-| **Google login** | `GET /public/auth/google/start` → Google → callback mints HS256 JWT → SPA stores in `sessionStorage` as `lb_jwt` |
+API key comparisons must use constant-time helpers. JWT decoding must verify expiration.
 
-JWT secret: `LEADERBOARD_JWT_SECRET` (env). Redirect URI is derived per-request from `request.url_root` to avoid `redirect_uri_mismatch` issues.
+## Environment Variables
 
----
+Keep `backend/.env.example` current whenever adding env usage.
 
-## Environment variables (complete)
+Core production values:
 
-All loaded from `backend/.env` (gitignored) or the monorepo root `Anote/.env` (gitignored). Both are auto-loaded by `app.py` via `python-dotenv`.
+```text
+FLASK_ENV=production
+PORT=5000
+ALLOWED_ORIGINS=https://leaderboard.anote.ai
+LEADERBOARD_FRONTEND_URL=https://leaderboard.anote.ai
+LEADERBOARD_OAUTH_PUBLIC_BASE_URL=https://api-leaderboard.anote.ai
+LEADERBOARD_JWT_SECRET=<strong random secret>
+FLASK_SECRET_KEY=<strong random secret>
+LEADERBOARD_API_KEYS=<optional write keys>
+LEADERBOARD_ADMIN_API_KEYS=<admin keys>
+GOOGLE_CLIENT_ID=<Google OAuth client id>
+GOOGLE_CLIENT_SECRET=<Google OAuth secret>
+```
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `GOOGLE_CLIENT_ID` | For OAuth | OAuth Web application client ID |
-| `GOOGLE_CLIENT_SECRET` | For OAuth | OAuth secret — **TODO: add to .env** |
-| `LEADERBOARD_JWT_SECRET` | For OAuth | HS256 signing key for post-login JWTs — **TODO: add to .env** |
-| `LEADERBOARD_FRONTEND_URL` | For OAuth | SPA origin for post-login redirect (default `http://localhost:3000`) |
-| `LEADERBOARD_OAUTH_PUBLIC_BASE_URL` | Prod only | Override when Flask sees internal URL behind TLS proxy |
-| `LEADERBOARD_API_KEYS` | Optional | Comma-separated write keys; when set, enforces `X-API-Key` auth |
-| `LEADERBOARD_ADMIN_API_KEYS` | Optional | Comma-separated admin keys (separate from write keys) |
-| `REQUIRE_API_KEY` | Optional | `1`/`true` to enforce write auth even if `LEADERBOARD_API_KEYS` is empty |
-| `FLASK_SECRET_KEY` | Recommended | Flask session secret |
-| `FLASK_ENV` | Dev | Set to `production` for prod deployments |
-| `ALLOWED_ORIGINS` | Prod required | Comma-separated CORS origins |
-| `DB_HOST/USER/PASSWORD/NAME/PORT` | Optional | MySQL connection; SQLite is used when unset/unavailable |
-| `SQLITE_DB_PATH` | Optional | SQLite file path for zero-config persistence; default `./leaderboard.db` |
-| `DISABLE_LEADERBOARD_AUTO_SEED` | Optional | `1`/`true` to skip built-in demo/runnable dataset auto-seeding |
-| `OPENAI_API_KEY` | Optional | For OpenAI LLM evaluation in CSV benchmarks |
-| `ANTHROPIC_API_KEY` | Optional | For Anthropic LLM evaluation |
-| `GOOGLE_API_KEY` | Optional | For Gemini LLM evaluation |
-| `PORT` | Optional | Flask port (default 5001) |
+Database:
 
----
+```text
+SQLITE_DB_PATH=./leaderboard.db
+DB_HOST=<rds-endpoint>
+DB_USER=<user>
+DB_PASSWORD=<password>
+DB_NAME=<database>
+DB_PORT=3306
+```
 
-## Current state of the codebase (May 2026)
+Provider keys:
 
-> See `TODO.md` for the full prioritized production-readiness checklist.
+```text
+OPENAI_API_KEY
+ANTHROPIC_API_KEY
+GOOGLE_API_KEY
+XAI_API_KEY
+OPENAI_BASE_URL
+OLLAMA_BASE_URL
+TRUSTED_REMOTE_CODE_MODELS
+```
 
-### What works
-- **Leaderboard auto-seeds on first request** — 25 entries appear immediately; no manual seeding step
-- **Live data + demo fallback** — "Demo" chip badge + API failure banner when API is empty/unreachable
-- **Loading skeleton cards** + **Refresh button** in `Leaderboard.js`
-- **SQLite persistence** — data survives restarts without MySQL (`SQLITE_DB_PATH=./leaderboard.db`)
-- **Composite 0–100 scoring** from all reported metrics (`composite_score.py`)
-- **Advanced metrics panel** — grouped/collapsible (Core, Precision/Recall, Semantic overlap, Ranking, Translation) with formula pills and range badges (`TaskAdvancedMetricsPanel.js`)
-- **Show top 3 / Show more** per leaderboard card
-- **Dataset Details page** never 404s for demo cards (`ui_fallback_dataset_catalog.py`)
-- **All 5 evaluator classes** (TextClassification, NER, QA, Retrieval, Translation) in `eval_core/evaluators.py`
-- **`GET /public/dataset_questions`** — returns unlabeled inputs for submission pipeline
-- **Classification/NER submissions can omit `sentence_ids`** — the API auto-generates sequential IDs
-- **Stale seed repair** — startup ensures required runnable datasets like `SST-2 Sentiment (Sample)` exist even when older rows are already present
-- **Daily submission quota** via `DAILY_SUBMISSION_LIMIT` env var + `X-Submissions-Remaining` header
-- **`POST /public/run_hf_model`** — sync/async HF model evaluation (requires `transformers`)
-- **`/create-leaderboard` wizard** — import a HF dataset + optionally run a HF model
-- **Blueprint structure** — routes split across 6 focused files; `app.py` ~250 lines
-- **`eval_core` lazy imports** — no numpy segfault on macOS
-- **Collapsible submission format block** in `SubmitToLeaderboard.js`
-- **Full metric breakdown per submission** in `MySubmissions.js`
-- **33 tests passing** in `backend/tests/`
+Rate limits/quotas:
 
-### What is deferred / incomplete
+```text
+DAILY_SUBMISSION_LIMIT
+SUBMIT_MODEL_RATE_LIMIT
+ADD_DATASET_RATE_LIMIT
+IMPORT_DATASET_RATE_LIMIT
+RUN_CSV_RATE_LIMIT
+DISABLE_RATE_LIMIT
+```
 
-See `TODO.md` for the full prioritized checklist. Top blockers:
+## Deployment Overview
 
-- **Auth secrets missing** — `GOOGLE_CLIENT_SECRET`, `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY`, `LEADERBOARD_ADMIN_API_KEYS` all unset in `backend/.env`
-- **Manual browser submission flow still needs QA** — API-level e2e tests cover the runnable `SST-2 Sentiment (Sample)` dataset, but the full UI click path still needs manual verification
-- **`_STORE` fallback remains volatile** — submissions/evaluations that cannot write to SQLite are kept in RAM and lost on restart
+`.github/workflows/deploy.yml` expects these GitHub repository secrets:
 
----
+```text
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_ACCOUNT_ID
+CLOUDFRONT_DIST_ID
+```
 
-## Conventions agents must follow
+Current workflow resources:
 
-### Always
-1. **Run `PYTHONPATH=. pytest -q tests/` from `backend/` before finishing.** All 33 tests must pass.
-2. **Run `npm run build` from `frontend/` before finishing.** Build must succeed (warnings OK, errors not).
-3. Keep the **SQLite default and in-memory `_STORE` fallback working** — never assume MySQL is available.
-4. Both `backend/tests/` and frontend build checks must stay green.
+```text
+AWS_REGION=us-east-1
+ECR_REPO=anote-leaderboard-backend
+EB_APP=anote-leaderboard
+EB_ENV=anote-leaderboard-prod
+S3_BUCKET=anote-leaderboard-frontend
+REACT_APP_API_ENDPOINT=https://api-leaderboard.anote.ai
+```
 
-### Backend style
-- Wrap optional imports in `try/except ImportError` with graceful degradation.
-- All new functions need Python type annotations.
-- New routes follow the existing pattern: register on the appropriate blueprint module and use `@rate_limit`, `@require_api_key` decorators as appropriate.
-- New metrics go in `METRICS_CATALOG` in `metrics_info_full.py` with `name`, `formula`, `description`, `range`, `when_to_use`.
-- New task types: add entry in `get_metrics_for_task()` AND alias in `normalize_task_type_for_metrics()` if needed.
+The deploy workflow:
 
-### Frontend style
-- Dark background is `bg-[#111827]` / `bg-[#0d1421]`. Accent yellow is `#defe47`. Accent blue is `#28b2fb`. Metric label gold is `#EDDC8F`.
-- All API calls use `const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001"`.
-- New page-level components live in `src/landing_page/landing_page_components/`.
-- New routes: add path constant to `src/constants/RouteConstants.js`, then add `<Route>` in `LandingPage.js`.
-- Avoid adding new npm dependencies without good reason — the bundle is already large.
+1. Runs CI.
+2. Checks for AWS secrets.
+3. Builds/pushes backend Docker image to ECR.
+4. Deploys backend to Elastic Beanstalk.
+5. Builds frontend.
+6. Syncs frontend build to S3.
+7. Invalidates CloudFront.
 
-### Git
-- Active branch: **`jeremy`** on `origin` (`https://github.com/anote-ai/Leaderboard.git`).
-- Always `git push origin jeremy` after committing — don't leave changes local.
-- Commit message format: `type(scope): description` (e.g. `fix(oauth): ...`, `feat(metrics): ...`, `chore(env): ...`).
+If AWS secrets are missing, deploy jobs are skipped with a warning rather than failing the repo.
 
----
+## Evaluation System
 
-## Common tasks
+Key files:
 
-### Add a new evaluation metric
-1. Add entry to `METRICS_CATALOG` in `backend/metrics_info_full.py`.
-2. Add the key to the relevant task list(s) in `get_metrics_for_task()`.
-3. If the evaluator should compute it, add it to the appropriate class in `eval_core/evaluators.py`.
-4. Add it to `composite_score.py`'s `_LOWER_IS_BETTER` if lower values are better.
-5. Run tests.
+- `backend/eval_core/evaluators.py`: task-specific scoring.
+- `backend/eval_core/leaderboard_bridge.py`: converts dataset/reference/prediction payloads into evaluator inputs and builds submission formats.
+- `backend/metrics_info_full.py`: metric metadata and per-task metric lists.
+- `backend/composite_score.py`: 0-100 aggregate scoring.
 
-### Add a new task type
-1. Add evaluator class to `eval_core/evaluators.py` extending `BaseEvaluator`.
-2. Register it in `eval_core/leaderboard_bridge.py` dispatch.
-3. Add metric list in `get_metrics_for_task()` in `metrics_info_full.py`.
-4. Add alias in `normalize_task_type_for_metrics()` if needed.
-5. Add entry in `ui_fallback_dataset_catalog.py` if demo datasets use this task type.
+Supported foundations include text classification, NER, QA/document QA, retrieval, translation, CSV benchmarks, HF import/model runners, and provider-backed LLM runs.
 
-### Add a new leaderboard demo card
-1. Add the dataset object to the `datasets` array in `frontend/src/landing_page/landing_page_components/Leaderboard.js` with `task_type` and `evaluation_metric` fields.
-2. Add a matching entry in `backend/ui_fallback_dataset_catalog.py` (key = lowercased name).
+When adding a metric:
 
-### Add a new API endpoint
-1. Add the Flask route in the appropriate `backend/blueprints/` module.
-2. Apply `@rate_limit` and `@require_api_key` / `@require_admin` as appropriate.
-3. Add a test in `backend/tests/`.
-4. Update the route table in this file (`AGENTS.md`) and `CLAUDE.md`.
+1. Add metadata in `metrics_info_full.py`.
+2. Add it to the relevant task list.
+3. Compute it in the evaluator if needed.
+4. Update `composite_score.py` if lower values are better.
+5. Add tests.
 
-### Fix a UI component
-1. Components are in `frontend/src/landing_page/landing_page_components/`.
-2. Check `src/constants/RouteConstants.js` for route path, `LandingPage.js` for rendering.
-3. Run `npm run build` to verify — no new errors.
+When adding a task type:
 
----
+1. Add or extend an evaluator in `eval_core/evaluators.py`.
+2. Register dispatch/conversion in `eval_core/leaderboard_bridge.py`.
+3. Add metric catalog/task mappings.
+4. Update submission-format behavior if the task has discrete labels/options.
+5. Add backend tests and, when applicable, frontend submission-format tests.
 
-## Open issues / known bugs (as of May 2026)
+## Frontend Conventions
 
-> Full checklist with file locations is in `TODO.md`.
+- API base should use:
+  `process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001"`.
+- Page-level components live in `frontend/src/landing_page/landing_page_components/`.
+- New routes go in `frontend/src/constants/RouteConstants.js` and `LandingPage.js`.
+- Keep the submission flow explicit about expected formats, allowed labels/options, and whether true labels are hidden.
+- Do not expose answer keys in the frontend for benchmark datasets.
+- Avoid adding new npm dependencies unless the value is clear.
 
-| Issue | Location | Priority |
-|-------|----------|----------|
-| Google OAuth broken — `GOOGLE_CLIENT_SECRET` missing | `backend/.env` | High |
-| `LEADERBOARD_JWT_SECRET`, `FLASK_SECRET_KEY` are placeholders | `backend/.env` | High |
-| `LEADERBOARD_ADMIN_API_KEYS` unset — seed route returns 503 | `backend/.env` | High |
-| Full UI submission flow needs manual QA | `SubmitToLeaderboard.js` + `MySubmissions.js` | Medium |
-| No frontend tests | — | Low |
-| `SubmitToLeaderboard.js` has ~20 unused state variables | `frontend/…/SubmitToLeaderboard.js` | Low |
-| Async eval job queue is stub only | `blueprints/submissions.py` + `blueprints/eval.py` | Low |
+Important components:
 
----
+- `SubmitToLeaderboard.js`: JSON/CSV/manual/LLM submission UX.
+- `submissionFormatUtils.js`: formats labels/options/sample JSON for submit prompts.
+- `MySubmissions.js`: user-owned history and actions.
+- `Leaderboard.js`: main leaderboard grid and advanced metric panel entry points.
+- `DatasetDetails.js`: dataset details and metric explanations.
+- `AdminSubmissionsModeration.js`: admin moderation surface.
 
-## Do not touch (without understanding)
+## Current Product Capabilities
 
-- `backend/pagination.py` — keyset cursor logic; tests cover it; changing break pagination.
-- `backend/auth_helpers.py` — JWT decode for both HS256 and JWKS; fragile.
-- `frontend/src/utils/leaderboardAuth.js` — token storage/retrieval used by AuthGuard and submit flow.
-- `backend/eval_core/evaluators.py` — NER partial match logic is subtle; test before changing.
+- Public dataset browsing and dataset details.
+- Submission format endpoint with labels/options but no answer leakage.
+- JSON upload, CSV upload, manual entry, and hosted LLM submission flows.
+- Sync and async submit workflows with job polling.
+- My Submissions history, private/public visibility, delete, detail, and compare flows.
+- Admin moderation and dataset/question visibility controls.
+- Daily quotas and per-minute rate limits.
+- Composite 0-100 scoring plus detailed metric breakdowns.
+- Leaderboard keyset pagination and export.
+- CSV benchmark runner.
+- Hugging Face import/model runner paths.
+- Google OAuth and JWT/API key/admin auth.
+- CI/CD and AWS deployment scaffold.
+
+## Known Gaps And Future Work
+
+Production/infrastructure:
+
+- Configure real AWS secrets/resources.
+- Use RDS/MySQL for production persistence.
+- Run one real production smoke test with OAuth, provider keys, submissions, admin, and export.
+- Replace in-process/thread-backed async jobs with a durable worker queue if usage grows.
+- Add Redis/shared rate-limit state for horizontal scaling.
+- Add provider cost caps/timeouts for hosted LLM runs.
+
+Testing:
+
+- Add Playwright/Cypress E2E tests for OAuth, JSON upload, CSV upload, hosted LLM submission, My Submissions, and admin.
+- Add broader frontend unit tests to CI.
+
+Product roadmap:
+
+- Hidden/public benchmark splits for true blind evaluation.
+- Generated benchmark suites from user sample data and Anote synthetic data pipelines.
+- Model notes, tags, experiment history, and performance-over-time dashboards.
+- Automatic critique/error analysis and model report cards.
+- Code generation, VLM/multimodal, audio/speech, tool-use agent, and enterprise workflow benchmarks.
+- Standardized model containers or inference adapters for true server-side blind eval.
+
+## Files To Be Careful With
+
+- `backend/pagination.py`: keyset cursor logic.
+- `backend/auth_helpers.py`: JWT/JWKS verification.
+- `backend/shared.py`: DB helpers, auth decorators, quotas, shared state.
+- `backend/blueprints/submissions.py`: core submission/eval/job flow.
+- `backend/eval_core/evaluators.py`: task scoring, especially NER span behavior.
+- `backend/eval_core/leaderboard_bridge.py`: submission format and evaluator bridge.
+- `frontend/src/landing_page/landing_page_components/SubmitToLeaderboard.js`: main submit UX.
+- `frontend/src/landing_page/landing_page_components/MySubmissions.js`: authenticated submission history.
+- `.github/workflows/deploy.yml`: deployment domains/secrets/resource names.
+
+## Handoff References
+
+- `HANDOFF_MESSAGE.md`: sendable high-level handoff and future directions.
+- `KNOWLEDGE_TRANSFER.md`: deployment-focused handoff notes.
+- `AUDIT_FIX_NOTES.md`: audit/fix history.
+- `README.md`: general product and API docs.
+- `TODO.md`: older backlog; useful, but verify against current code before treating any item as open.
