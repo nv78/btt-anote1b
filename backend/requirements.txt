@@ -25,16 +25,18 @@ mysql-connector-python>=8.0,<10
 # ── Docs / linting (dev, also needed for CI mkdocs build) ─────────────────
 flasgger>=0.9,<1
 
+# ── Hosted providers / production integrations ───────────────────────────
+openai>=1.40,<2
+anthropic>=0.34,<1
+google-generativeai>=0.7,<1
+boto3>=1.34,<2
+
 # ── Testing ───────────────────────────────────────────────────────────────
 pytest>=7,<9
 pytest-cov>=4,<6
 
 # ── Optional — uncomment when needed ─────────────────────────────────────
 # bert-score>=0.3          # BERTScore translation metric
-# openai>=1.40             # OpenAI LLM runner
-# anthropic>=0.34          # Anthropic LLM runner
-# google-generativeai>=0.7 # Gemini LLM runner
-# boto3>=1.34              # AWS SES email / S3
 # transformers>=4.44       # HF model runner
 # torch>=2.3               # HF model runner (CPU)
 # xai-sdk>=0.2             # xAI LLM runner

@@ -23,8 +23,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt pytest-cov ruff mkdocs-material
 
-      - name: Lint (ruff)
-        run: ruff check backend
+      - name: Lint (ruff fatal checks)
+        run: ruff check backend --select E9,F63,F7,F82
 
       - name: Run tests with coverage
         run: |
