@@ -237,6 +237,19 @@ The analytics foundation is there, but the full analytics product is not finishe
 - Regression detection.
 - Automatic critique: weakest classes, common error buckets, representative failure examples, and suggested next experiments without leaking hidden labels.
 
+### Bigger Product Directions
+
+- Let users upload a small amount of their own task data, then generate benchmark datasets from it using Anote's synthetic data pipelines.
+- Create private company-specific benchmark suites for niche workflows, then let teams track model quality against those suites over time.
+- Support hidden/public benchmark splits so users can iterate on public examples while Anote preserves a true blind test set.
+- Add dataset quality tooling: deduplication, label-balance checks, ambiguity detection, adversarial example generation, and benchmark difficulty scoring.
+- Build an "eval suite generator" where a user describes a target behavior, uploads examples, and gets a ready-to-run leaderboard benchmark with labels, scoring, and starter prompts.
+- Add model report cards that summarize strengths, weaknesses, regressions, safety risks, and recommended next training/evaluation steps.
+- Support standardized model containers or inference adapters so users can submit a model once and Anote runs it against multiple private benchmarks.
+- Add longitudinal team analytics: compare model families, fine-tune versions, prompt versions, datasets, and training recipes across time.
+- Expand beyond NLP into code generation, VLM/multimodal, audio/speech, tool-use agents, structured extraction, and enterprise workflow automation benchmarks.
+- Use evaluator ensembles for richer scoring: deterministic metrics, embedding similarity, LLM-as-judge, rubric-based grading, and human review queues for high-value edge cases.
+
 ## Read First Before Continuing
 
 - `KNOWLEDGE_TRANSFER.md`
