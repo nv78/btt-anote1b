@@ -17,36 +17,17 @@ import {
 } from "../../constants/DbEnums";
 import { formatMetricsSummary } from "../../utils/formatMetricsSummary";
 import { getLeaderboardJwt } from "../../utils/leaderboardAuth";
+import {
+  buildQuestionsExport,
+  buildSampleJson,
+  normalizeParsedSubmissionJson,
+  parseSubmissionCsvText,
+} from "./submissionFormatUtils";
 
 // Simple API base for dev
 const API_BASE = process.env.REACT_APP_API_BASE || process.env.REACT_APP_API_ENDPOINT || "http://localhost:5001";
 
 // ── Sample JSON return format component ──────────────────────────────────────
-
-const SAMPLE_OUTPUTS = {
-  text_classification:        ["positive", "negative", "positive"],
-  named_entity_recognition:   ["Barack Obama; United States", "Apple Inc.; Cupertino", ""],
-  document_qa:                ["1955", "Evelyn Lincoln", "the Oval Office"],
-  line_qa:                    ["Paris", "H2O", "photosynthesis"],
-  multiple_choice_qa:         ["A", "C", "B"],
-  natural_language_inference:  ["entailment", "contradiction", "neutral"],
-  math_reasoning:             ["42", "17.5", "100"],
-  summarization:              ["Scientists discover water on Mars.", "Stock markets fall sharply.", "New study links diet to longevity."],
-  translation:                ["Bonjour le monde", "Gracias por su ayuda", "Wie geht es Ihnen"],
-  text_generation:            ["Once upon a time in a land far away…", "The quick brown fox jumps over…", "In conclusion, the results show…"],
-  code_generation:            ["def add(a, b):\n    return a + b", "SELECT * FROM users WHERE id = 1;", "console.log('hello world');"],
-  fact_verification:          ["supported", "refuted", "not enough info"],
-  retrieval:                  ["The mitochondria is the powerhouse of the cell.", "Water boils at 100°C at sea level.", ""],
-  semantic_similarity:        ["0.92", "0.14", "0.78"],
-};
-
-const buildSampleJson = (taskType, sentenceIds, allowedOutputs = []) => {
-  const tt = (taskType || "text_classification").toLowerCase().replace(/-/g, "_");
-  const outputs = SAMPLE_OUTPUTS[tt] || SAMPLE_OUTPUTS.text_classification;
-  const ids = sentenceIds && sentenceIds.length ? sentenceIds : [0, 1, 2];
-  const sample = ids.slice(0, 3).map((id, i) => ({ id, output: allowedOutputs[i % allowedOutputs.length] || outputs[i] || outputs[0] }));
-  return JSON.stringify(sample, null, 2);
-};
 
 const SampleJsonFormat = ({ taskType, sentenceIds, allowedOutputs = [] }) => {
   const [copied, setCopied] = React.useState(false);
@@ -527,25 +508,9 @@ const SubmitToLeaderboard = ({
     if (!sourceSentences.length) return;
     let text;
     if (format === "json") {
-      text = JSON.stringify(
-        sourceSentences.map((s, i) => ({
-          id: sentenceIds[i],
-          question: s,
-          ...(questionOptions[i]?.length ? { options: questionOptions[i] } : {}),
-          ...(allowedOutputs.length ? { allowed_outputs: allowedOutputs } : {}),
-        })),
-        null, 2
-      );
+      text = buildQuestionsExport({ sourceSentences, sentenceIds, questionOptions, allowedOutputs, format: "json" });
     } else {
-      text = sourceSentences.map((s, i) => {
-        const options = questionOptions[i]?.length
-          ? `\nOptions:\n${questionOptions[i].map((o) => `${o.label}) ${o.text}`).join("\n")}`
-          : "";
-        return `#${sentenceIds[i]}: ${s}${options}`;
-      }).join("\n\n");
-      if (allowedOutputs.length) {
-        text = `Allowed labels: ${allowedOutputs.join(", ")}\n\n${text}`;
-      }
+      text = buildQuestionsExport({ sourceSentences, sentenceIds, questionOptions, allowedOutputs, format: "text" });
     }
     try {
       await navigator.clipboard.writeText(text);
@@ -684,24 +649,7 @@ const SubmitToLeaderboard = ({
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
-          const parsed = JSON.parse(e.target.result);
-          let modelResults = [], ids = [];
-          if (Array.isArray(parsed)) {
-            parsed.forEach((item, idx) => {
-              const output = item.output ?? item.prediction ?? item.translation ?? item.answer ?? item.result ?? "";
-              const rawId = item.id ?? item.sentence_id ?? idx;
-              const numId = Number(rawId);
-              modelResults.push(String(output));
-              ids.push(isNaN(numId) ? idx : numId);
-            });
-          } else if (parsed.modelResults && parsed.sentence_ids) {
-            modelResults = parsed.modelResults;
-            ids = parsed.sentence_ids;
-          } else {
-            reject(new Error("Unrecognized JSON format. Expected array of {id, output} or {modelResults, sentence_ids}."));
-            return;
-          }
-          resolve({ modelResults, sentenceIds: ids });
+          resolve(normalizeParsedSubmissionJson(JSON.parse(e.target.result)));
         } catch (err) {
           reject(new Error("Invalid JSON file"));
         }
@@ -715,26 +663,16 @@ const SubmitToLeaderboard = ({
   const [useCsv, setUseCsv] = useState(false);
   const parseSubmissionCsv = async (file) => {
     return new Promise((resolve, reject) => {
-      Papa.parse(file, {
-        header: true,
-        complete: (results) => {
-          try {
-            const rows = (results.data || []).filter((row) => (
-              row && Object.values(row).some((value) => String(value ?? "").trim())
-            ));
-            const modelResults = [];
-            const ids = [];
-            rows.forEach((r, idx) => {
-              const text = r.translation || r.Translations || r.output || r.Output || r.prediction || r.Prediction || r.answer || r.Answer || '';
-              const sid = r.sentence_id != null ? Number(r.sentence_id) : (r.id != null ? Number(r.id) : (r.index != null ? Number(r.index) : idx));
-              modelResults.push(String(text));
-              ids.push(sid);
-            });
-            resolve({ modelResults, sentenceIds: ids });
-          } catch (e) { reject(e); }
-        },
-        error: reject,
-      })
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          resolve(parseSubmissionCsvText(e.target.result || ""));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsText(file);
     });
   };
 

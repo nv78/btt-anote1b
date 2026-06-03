@@ -247,6 +247,38 @@ def _pick_primary(detailed: Dict[str, Any], requested: str, task_norm: str) -> f
     return 0.0
 
 
+def _option_labels_from_reference_data(rd: Dict[str, Any]) -> List[str]:
+    """Return distinct multiple-choice option labels found in ground_truth rows."""
+    labels: List[str] = []
+    seen = set()
+    rows = rd.get("ground_truth")
+    if not isinstance(rows, list):
+        return labels
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("options") or row.get("choices") or row.get("answer_choices")
+        row_labels: List[str] = []
+        if isinstance(raw, dict):
+            row_labels = [str(key).strip() for key in raw.keys()]
+        elif isinstance(raw, list):
+            for idx, value in enumerate(raw):
+                fallback = chr(ord("A") + idx)
+                if isinstance(value, dict):
+                    row_labels.append(str(value.get("label") or value.get("letter") or value.get("key") or fallback).strip())
+                else:
+                    row_labels.append(fallback)
+        else:
+            for letter in ("A", "B", "C", "D", "E", "F"):
+                if row.get(letter) is not None or row.get(letter.lower()) is not None:
+                    row_labels.append(letter)
+        for label in row_labels:
+            if label and label not in seen:
+                seen.add(label)
+                labels.append(label)
+    return labels
+
+
 def recipe_payload_to_benchmark_import(recipe: Dict[str, Any]) -> Dict[str, Any]:
     """Turn Personal hf_dataset_recipes import payload into Leaderboard hf_importer shape."""
     gt = recipe.get("ground_truth") or []
@@ -328,6 +360,8 @@ def submission_format_for_dataset(
                     if label and label not in seen:
                         seen.add(label)
                         allowed_outputs.append(label)
+        if task_norm == "multiple_choice_qa" and not allowed_outputs:
+            allowed_outputs = _option_labels_from_reference_data(rd)
         if task_norm == "natural_language_inference" and not allowed_outputs:
             allowed_outputs = ["entailment", "neutral", "contradiction"]
         elif task_norm == "fact_verification" and not allowed_outputs:
@@ -337,7 +371,7 @@ def submission_format_for_dataset(
 
     placeholder_results: List[str] = []
     for _ in example_ids:
-        if task_norm == "text_classification":
+        if task_norm in ("text_classification", "multiple_choice_qa", "natural_language_inference", "fact_verification"):
             placeholder_results.append(allowed_outputs[0] if allowed_outputs else "<predicted_label>")
         elif task_norm == "named_entity_recognition":
             placeholder_results.append("ENTITY_ONE; ENTITY_TWO")

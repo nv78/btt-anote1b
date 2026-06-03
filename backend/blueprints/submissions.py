@@ -363,12 +363,16 @@ def submit_model():
             try:
                 out = _persist_and_build_response()
                 with _EVAL_JOBS_LOCK:
-                    created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
-                    _EVAL_JOBS[job_id] = {"status": "completed", "_created": created, **out}
+                    existing = _EVAL_JOBS.get(job_id, {})
+                    created = existing.get("_created", utc_now().timestamp())
+                    owner = existing.get("_owner")
+                    _EVAL_JOBS[job_id] = {"status": "completed", "_created": created, "_owner": owner, **out}
             except Exception as e:
                 with _EVAL_JOBS_LOCK:
-                    created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
-                    _EVAL_JOBS[job_id] = {"status": "failed", "_created": created, "error": str(e)}
+                    existing = _EVAL_JOBS.get(job_id, {})
+                    created = existing.get("_created", utc_now().timestamp())
+                    owner = existing.get("_owner")
+                    _EVAL_JOBS[job_id] = {"status": "failed", "_created": created, "_owner": owner, "error": str(e)}
 
         job_id = str(uuid.uuid4())
         _now = utc_now().timestamp()
@@ -628,6 +632,7 @@ def my_submissions():
             "score": ev["score"],
             "primary_metric": det.get("metric"),
             "detailed_scores": det.get("detailed_scores"),
+            "is_public": bool(sub_row.get("is_public", 1)),
             "_created": sub_row["created"],
             "_id": sub_row["id"],
         })
@@ -655,6 +660,7 @@ def my_submissions():
             "primary_metric": r["primary_metric"],
             "detailed_scores": r["detailed_scores"],
             "submitted_at": r["_created"].isoformat(),
+            "is_public": r["is_public"],
         })
     out = {
         "success": True,
@@ -1237,10 +1243,13 @@ def run_llm_submission():
                         pass
 
             with _EVAL_JOBS_LOCK:
-                created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
+                existing = _EVAL_JOBS.get(job_id, {})
+                created = existing.get("_created", utc_now().timestamp())
+                owner = existing.get("_owner")
                 _EVAL_JOBS[job_id] = {
                     "status": "completed",
                     "_created": created,
+                    "_owner": owner,
                     "success": True,
                     "submission_id": submission_id,
                     "score": float(score),
@@ -1250,8 +1259,10 @@ def run_llm_submission():
                 }
         except Exception as e:
             with _EVAL_JOBS_LOCK:
-                created = _EVAL_JOBS.get(job_id, {}).get("_created", utc_now().timestamp())
-                _EVAL_JOBS[job_id] = {"status": "failed", "_created": created, "error": str(e)}
+                existing = _EVAL_JOBS.get(job_id, {})
+                created = existing.get("_created", utc_now().timestamp())
+                owner = existing.get("_owner")
+                _EVAL_JOBS[job_id] = {"status": "failed", "_created": created, "_owner": owner, "error": str(e)}
 
     job_id = str(uuid.uuid4())
     _now = utc_now().timestamp()
